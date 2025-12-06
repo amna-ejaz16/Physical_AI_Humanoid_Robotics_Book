@@ -1,0 +1,43 @@
+  name: Deploy to GitHub Pages
+
+  on:
+    push:
+      branches:
+        - 001-physical-ai-robotics
+    workflow_dispatch:
+
+  jobs:
+    deploy:
+      runs-on: ubuntu-latest
+
+      defaults:
+        run:
+          working-directory: ./docs
+
+      steps:
+        - name: Checkout repository
+          uses: actions/checkout@v4
+          with:
+            token: ${{ secrets.GH_PAT }}
+
+        - name: Setup Node.js
+          uses: actions/setup-node@v4
+          with:
+            node-version: '18'
+            cache: 'npm'
+            cache-dependency-path: './docs/package-lock.json'
+
+        - name: Install dependencies
+          run: npm ci
+
+        - name: Build website
+          run: npm run build
+
+        - name: Deploy to GitHub Pages
+          uses: peaceiris/actions-gh-pages@v3
+          with:
+            github_token: ${{ secrets.GH_PAT }}
+            publish_dir: ./docs/build
+            user_name: 'amna-ejaz16'
+            user_email: 'amnaejaz200@gmail.com'
+            publish_branch: gh-pages
