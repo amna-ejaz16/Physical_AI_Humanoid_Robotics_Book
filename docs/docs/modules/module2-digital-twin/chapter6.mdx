@@ -1,0 +1,1561 @@
+---
+sidebar_position: 6
+title: Chapter 6 - Visualization in Unity
+---
+
+# Chapter 6: Visualization in Unity
+
+## Learning Objectives
+
+By the end of this chapter, you will be able to:
+
+1. Integrate Unity with ROS 2 using the Unity Robotics Hub
+2. Create high-fidelity 3D visualizations of humanoid robots
+3. Implement realistic rendering with materials, lighting, and post-processing
+4. Simulate human-robot interaction (HRI) scenarios in Unity
+5. Synchronize robot state between ROS 2 and Unity in real-time
+6. Design interactive environments for testing robot behaviors
+7. Apply Unity's physics engine for visualization and validation
+
+---
+
+## 6.1 Why Unity for Robotics Visualization?
+
+While Gazebo excels at physics simulation and sensor modeling, **Unity** provides unparalleled visual fidelity and human-robot interaction capabilities.
+
+### Unity's Strengths for Robotics
+
+1. **Photorealistic Rendering**: Advanced graphics pipeline (URP, HDRP)
+2. **Interactivity**: Built-in support for VR/AR and user interfaces
+3. **Asset Ecosystem**: Vast library of 3D models, materials, and environments
+4. **Cross-Platform**: Deploy to Windows, Linux, macOS, mobile, VR headsets
+5. **Real-Time Performance**: Optimized rendering at 60+ FPS
+6. **Human Simulation**: Realistic avatars for HRI testing
+7. **Developer Tools**: Visual debugging, scene composition, prefab system
+
+### Unity vs. Gazebo: Complementary Tools
+
+| Feature | Gazebo | Unity |
+|---------|--------|-------|
+| **Physics Accuracy** | High (ODE, DART, Bullet) | Medium (PhysX, tunable) |
+| **Visual Quality** | Basic | Photorealistic |
+| **Sensor Simulation** | Excellent (LiDAR, IMU, cameras) | Good (cameras, raycasts) |
+| **HRI Testing** | Limited | Excellent |
+| **VR/AR Support** | None | Native |
+| **Learning Curve** | Moderate (robotics-focused) | Moderate (game-focused) |
+| **Best For** | Physics simulation, testing | Visualization, HRI, demos |
+
+:::info Unity Robotics Hub
+Unity Robotics Hub is Unity Technologies' official toolkit for integrating Unity with ROS 2. It provides ROS message serialization, URDF importers, and visualization tools specifically designed for robotics workflows.
+:::
+
+---
+
+## 6.2 Setting Up Unity for ROS 2
+
+### 6.2.1 Installation Requirements
+
+**Software Requirements**:
+- **Unity 2021.3 LTS** or newer (recommended for stability)
+- **ROS 2 Humble** or newer
+- **Ubuntu 22.04** or **Windows 10/11** (with WSL2 for ROS)
+- **Git** for cloning repositories
+
+**Hardware Requirements**:
+- **GPU**: NVIDIA RTX 4070 Ti or better (for real-time ray tracing)
+- **RAM**: 16 GB minimum, 32 GB recommended
+- **Storage**: 50 GB for Unity, assets, and projects
+
+### 6.2.2 Installing Unity
+
+**Option 1: Unity Hub (Recommended)**
+
+1. Download Unity Hub from [unity.com](https://unity.com/download)
+2. Install Unity 2021.3 LTS or 2022.3 LTS
+3. Add modules:
+   - Linux Build Support (if on Windows)
+   - Windows Build Support (if on Linux)
+   - Visual Studio or JetBrains Rider
+
+**Option 2: Command Line (Linux)**
+
+```bash
+# Download Unity Hub AppImage
+wget https://public-cdn.cloud.unity3d.com/hub/prod/UnityHub.AppImage
+chmod +x UnityHub.AppImage
+./UnityHub.AppImage
+
+# Install Unity Editor 2021.3 LTS via Hub
+# Or use unity-editor-installer for headless setups
+```
+
+### 6.2.3 Installing Unity Robotics Hub
+
+**Clone the Repository**:
+
+```bash
+cd ~/ros2_ws/src
+git clone https://github.com/Unity-Technologies/Unity-Robotics-Hub.git
+```
+
+**Unity Packages to Import**:
+
+1. **ROS-TCP-Connector**: Handles TCP communication between Unity and ROS 2
+2. **URDF-Importer**: Imports URDF files into Unity scenes
+3. **Visualizations**: Tools for publishing Unity transforms to ROS
+
+**Installation via Unity Package Manager**:
+
+```
+1. Open Unity project
+2. Window > Package Manager
+3. Click '+' > Add package from git URL
+4. Add: https://github.com/Unity-Technologies/ROS-TCP-Connector.git?path=/com.unity.robotics.ros-tcp-connector
+5. Add: https://github.com/Unity-Technologies/URDF-Importer.git?path=/com.unity.robotics.urdf-importer
+```
+
+---
+
+## 6.3 Unity-ROS 2 Communication Architecture
+
+### 6.3.1 ROS-TCP-Endpoint
+
+The **ROS-TCP-Endpoint** runs on your ROS 2 system and bridges ROS topics with Unity via TCP sockets.
+
+**Installation**:
+
+```bash
+cd ~/ros2_ws/src
+git clone https://github.com/Unity-Technologies/ROS-TCP-Endpoint.git
+cd ~/ros2_ws
+colcon build --packages-select ros_tcp_endpoint
+source install/setup.bash
+```
+
+**Launch the Endpoint**:
+
+```bash
+ros2 run ros_tcp_endpoint default_server_endpoint --ros-args -p ROS_IP:=0.0.0.0
+```
+
+**Default Configuration**:
+- **Port**: 10000
+- **IP**: `0.0.0.0` (listens on all interfaces)
+- **Protocol**: TCP with JSON serialization
+
+### 6.3.2 ROS-TCP-Connector (Unity Side)
+
+**Setup in Unity**:
+
+1. Create empty GameObject: `ROSConnection`
+2. Add component: `ROS Connection`
+3. Configure:
+   - **ROS IP Address**: `127.0.0.1` (localhost) or `<your-ros-machine-ip>`
+   - **ROS Port**: `10000`
+   - **Protocol**: `ROS2`
+   - **Serializer**: `MessageSerializer`
+
+**Test Connection**:
+
+```csharp
+using UnityEngine;
+using Unity.Robotics.ROSTCPConnector;
+
+public class TestConnection : MonoBehaviour
+{
+    void Start()
+    {
+        ROSConnection ros = ROSConnection.GetOrCreateInstance();
+        ros.Connect();
+        Debug.Log("Connected to ROS: " + ros.HasConnectionThread);
+    }
+}
+```
+
+---
+
+## 6.4 Importing URDF Models into Unity
+
+### 6.4.1 URDF Importer Workflow
+
+**Step 1: Prepare URDF Files**
+
+Ensure your URDF is complete:
+- All mesh files (`.dae`, `.stl`, `.obj`) are referenced correctly
+- Relative paths use `package://` or absolute paths
+- Materials and textures are included
+
+**Example URDF Structure**:
+```
+humanoid_description/
+├── urdf/
+│   └── humanoid.urdf
+├── meshes/
+│   ├── torso.dae
+│   ├── head.stl
+│   └── ...
+└── materials/
+    └── textures/
+```
+
+**Step 2: Import URDF into Unity**
+
+```
+1. Assets > Import Robot from URDF
+2. Select URDF file: humanoid.urdf
+3. Choose import settings:
+   - Axis Conversion: Y-Up (Unity) from Z-Up (ROS)
+   - Mesh Decomposer: VHACD (for collision)
+   - Import Materials: Yes
+4. Click Import
+```
+
+**Step 3: Verify Import**
+
+Check the imported hierarchy:
+```
+HumanoidRobot (GameObject)
+├── base_link
+├── torso
+│   ├── head
+│   └── ...
+├── left_arm
+│   ├── left_shoulder
+│   ├── left_elbow
+│   └── left_hand
+└── right_arm
+    └── ...
+```
+
+Each link becomes a GameObject with:
+- **MeshFilter**: Visual geometry
+- **MeshRenderer**: Material rendering
+- **ArticulationBody**: Joint physics (Unity's robot joint system)
+
+### 6.4.2 Articulation Bodies
+
+Unity uses **ArticulationBody** components (instead of Rigidbody + ConfigurableJoint) for robotic articulations.
+
+**Advantages**:
+- Better stability for long kinematic chains
+- Direct support for revolute, prismatic, and fixed joints
+- Reduced jitter compared to traditional joints
+
+**Example Configuration**:
+
+```csharp
+// Access ArticulationBody for a joint
+ArticulationBody shoulder = leftArmObject.GetComponent<ArticulationBody>();
+
+// Read joint position
+float currentAngle = shoulder.jointPosition[0]; // radians
+
+// Set joint target (position control)
+ArticulationDrive drive = shoulder.xDrive;
+drive.target = 1.57f; // 90 degrees
+shoulder.xDrive = drive;
+```
+
+---
+
+## 6.5 Real-Time Robot State Synchronization
+
+### 6.5.1 Publishing Joint States from ROS 2
+
+**ROS 2 Joint State Publisher**:
+
+```python
+#!/usr/bin/env python3
+import rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import JointState
+
+class JointStatePublisher(Node):
+    def __init__(self):
+        super().__init__('joint_state_publisher')
+        self.publisher = self.create_publisher(JointState, '/joint_states', 10)
+        self.timer = self.create_timer(0.02, self.publish_joint_states)  # 50 Hz
+
+        self.joint_names = [
+            'left_shoulder_pitch', 'left_shoulder_roll', 'left_elbow',
+            'right_shoulder_pitch', 'right_shoulder_roll', 'right_elbow',
+            'left_hip_pitch', 'left_knee', 'left_ankle',
+            'right_hip_pitch', 'right_knee', 'right_ankle'
+        ]
+
+        self.positions = [0.0] * len(self.joint_names)
+
+    def publish_joint_states(self):
+        msg = JointState()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.name = self.joint_names
+        msg.position = self.positions
+        # Update positions based on robot controller output
+        self.publisher.publish(msg)
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = JointStatePublisher()
+    rclpy.spin(node)
+    node.destroy_node()
+    rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+```
+
+### 6.5.2 Subscribing to Joint States in Unity
+
+**Unity C# Subscriber**:
+
+```csharp
+using UnityEngine;
+using Unity.Robotics.ROSTCPConnector;
+using RosMessageTypes.Sensor;
+
+public class JointStateSubscriber : MonoBehaviour
+{
+    private ROSConnection ros;
+    private ArticulationBody[] articulationBodies;
+
+    void Start()
+    {
+        ros = ROSConnection.GetOrCreateInstance();
+        ros.Subscribe<JointStateMsg>("/joint_states", UpdateJointStates);
+
+        // Get all articulation bodies in robot
+        articulationBodies = GetComponentsInChildren<ArticulationBody>();
+    }
+
+    void UpdateJointStates(JointStateMsg msg)
+    {
+        for (int i = 0; i < msg.name.Length; i++)
+        {
+            string jointName = msg.name[i];
+            float position = (float)msg.position[i];
+
+            // Find corresponding articulation body
+            ArticulationBody body = FindArticulationByName(jointName);
+            if (body != null)
+            {
+                // Set joint target position
+                ArticulationDrive drive = body.xDrive;
+                drive.target = position * Mathf.Rad2Deg; // Convert to degrees
+                body.xDrive = drive;
+            }
+        }
+    }
+
+    ArticulationBody FindArticulationByName(string name)
+    {
+        foreach (var body in articulationBodies)
+        {
+            if (body.name.Contains(name))
+                return body;
+        }
+        return null;
+    }
+}
+```
+
+### 6.5.3 Publishing Unity State to ROS 2
+
+**Publish Robot Pose to TF**:
+
+```csharp
+using UnityEngine;
+using Unity.Robotics.ROSTCPConnector;
+using RosMessageTypes.Geometry;
+
+public class PosePublisher : MonoBehaviour
+{
+    private ROSConnection ros;
+    public string topicName = "/unity/robot_pose";
+    public float publishRate = 30f; // Hz
+
+    private float timer = 0f;
+
+    void Start()
+    {
+        ros = ROSConnection.GetOrCreateInstance();
+        ros.RegisterPublisher<PoseStampedMsg>(topicName);
+    }
+
+    void Update()
+    {
+        timer += Time.deltaTime;
+        if (timer >= 1f / publishRate)
+        {
+            PublishPose();
+            timer = 0f;
+        }
+    }
+
+    void PublishPose()
+    {
+        PoseStampedMsg msg = new PoseStampedMsg();
+        msg.header.stamp = new TimeStamp(Clock.time);
+        msg.header.frame_id = "world";
+
+        // Convert Unity coordinates to ROS (Unity: Y-up, ROS: Z-up)
+        Vector3 unityPos = transform.position;
+        msg.pose.position = new PointMsg(
+            unityPos.z,   // ROS X = Unity Z
+            -unityPos.x,  // ROS Y = -Unity X
+            unityPos.y    // ROS Z = Unity Y
+        );
+
+        Quaternion unityRot = transform.rotation;
+        msg.pose.orientation = new QuaternionMsg(
+            unityRot.z, -unityRot.x, unityRot.y, unityRot.w
+        );
+
+        ros.Publish(topicName, msg);
+    }
+}
+```
+
+---
+
+## 6.6 High-Fidelity Rendering in Unity
+
+### 6.6.1 Render Pipelines
+
+Unity offers three render pipelines:
+
+**1. Built-in Render Pipeline** (Legacy):
+- Simple, broad compatibility
+- Limited visual quality
+- Not recommended for new projects
+
+**2. Universal Render Pipeline (URP)**:
+- High performance, scalable
+- Good for mobile, VR, and real-time robotics
+- Recommended for most robotics applications
+
+**3. High Definition Render Pipeline (HDRP)**:
+- Photorealistic rendering
+- Ray tracing, volumetric lighting
+- Requires high-end GPU (RTX 4070 Ti+)
+- Best for offline rendering, demos, presentations
+
+:::tip Choosing a Pipeline
+For real-time humanoid visualization with HRI: **Use URP** for 60+ FPS performance. For marketing videos or static renders: **Use HDRP** for maximum visual quality.
+:::
+
+### 6.6.2 Setting Up URP
+
+**Create URP Project**:
+
+```
+1. New Project > 3D (URP) Template
+   OR
+2. Existing Project:
+   - Window > Package Manager > Install "Universal RP"
+   - Assets > Create > Rendering > URP Asset (with 2D Renderer)
+   - Edit > Project Settings > Graphics > Scriptable Render Pipeline Settings > Set URP Asset
+```
+
+**URP Asset Settings for Robotics**:
+
+```
+Quality: High
+HDR: On
+MSAA: 4x (anti-aliasing)
+Render Scale: 1.0
+Shadows:
+  - Max Distance: 50m
+  - Cascade Count: 4
+Lighting:
+  - Main Light: Per Pixel
+  - Additional Lights: Per Pixel
+  - Max Additional Lights: 8
+Post-processing: On
+```
+
+### 6.6.3 Materials and Textures
+
+**Creating Realistic Robot Materials**:
+
+**1. Metallic Robot Body**:
+
+```
+Shader: URP/Lit
+Base Map: robot_albedo.png
+Metallic: 0.9
+Smoothness: 0.85
+Normal Map: robot_normal.png
+Emission: Off
+```
+
+**2. Matte Plastic Casing**:
+
+```
+Shader: URP/Lit
+Base Color: #F0F0F0 (light gray)
+Metallic: 0.0
+Smoothness: 0.3
+Normal Map: plastic_normal.png
+```
+
+**3. LED Indicators**:
+
+```
+Shader: URP/Lit
+Base Color: #FF0000 (red)
+Metallic: 0.0
+Emission: On
+Emission Color: #FF0000
+Emission Intensity: 2.0
+```
+
+**Applying PBR Workflow**:
+
+Physically Based Rendering (PBR) uses:
+- **Albedo**: Base color without lighting
+- **Metallic**: 0 = dielectric, 1 = metal
+- **Smoothness**: 0 = rough, 1 = mirror-like
+- **Normal Map**: Surface detail without geometry
+- **Ambient Occlusion**: Crevice shading
+
+### 6.6.4 Lighting
+
+**Three-Point Lighting Setup**:
+
+**1. Key Light** (Main Directional):
+```
+Type: Directional Light
+Intensity: 1.0
+Color: #FFFFFF
+Rotation: (50, -30, 0)
+Shadows: Soft, High Resolution
+```
+
+**2. Fill Light**:
+```
+Type: Directional Light
+Intensity: 0.3
+Color: #B0C4DE (slight blue tint)
+Rotation: (-30, 150, 0)
+Shadows: Off
+```
+
+**3. Rim Light**:
+```
+Type: Spot Light
+Intensity: 2.0
+Range: 20m
+Spot Angle: 45°
+Position: Behind robot
+Shadows: Off
+```
+
+**Environment Lighting**:
+
+```csharp
+// Set skybox for ambient lighting
+RenderSettings.skybox = skyboxMaterial;
+RenderSettings.ambientIntensity = 0.5f;
+RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Skybox;
+
+// Use HDRI for realistic reflections
+RenderSettings.defaultReflectionMode = UnityEngine.Rendering.DefaultReflectionMode.Custom;
+RenderSettings.customReflection = hdriCubemap;
+```
+
+### 6.6.5 Post-Processing
+
+**Install Post-Processing Package**:
+
+```
+Window > Package Manager > Post Processing
+```
+
+**Create Post-Processing Volume**:
+
+```
+1. GameObject > Volume > Global Volume
+2. Add Override: Bloom
+   - Intensity: 0.3
+   - Threshold: 1.0
+3. Add Override: Color Grading
+   - Temperature: +5 (warm)
+   - Saturation: +10
+4. Add Override: Ambient Occlusion
+   - Intensity: 0.5
+   - Radius: 0.5m
+5. Add Override: Motion Blur (optional for videos)
+   - Intensity: 0.2
+```
+
+---
+
+## 6.7 Human-Robot Interaction (HRI) Simulation
+
+### 6.7.1 Adding Human Characters
+
+**Using Unity's Character Controller**:
+
+**Option 1: Mixamo Characters** (Free)
+
+1. Visit [mixamo.com](https://www.mixamo.com)
+2. Select character (e.g., "Kaya")
+3. Download with T-pose, FBX format
+4. Import to Unity: Assets > Import Package > Custom Package
+5. Add Animator component
+6. Create Animator Controller with walk/idle animations
+
+**Option 2: Unity Asset Store**:
+
+Search for "Realistic Human" assets:
+- **Synty Polygon** characters (stylized, performant)
+- **Reallusion** characters (photorealistic)
+
+**Setting Up Human Navigation**:
+
+```csharp
+using UnityEngine;
+using UnityEngine.AI;
+
+public class HumanNavigator : MonoBehaviour
+{
+    private NavMeshAgent agent;
+    public Transform[] waypoints;
+    private int currentWaypoint = 0;
+
+    void Start()
+    {
+        agent = GetComponent<NavMeshAgent>();
+        agent.speed = 1.4f; // Average human walking speed (m/s)
+        agent.angularSpeed = 120f;
+        agent.acceleration = 8f;
+
+        if (waypoints.Length > 0)
+            agent.SetDestination(waypoints[0].position);
+    }
+
+    void Update()
+    {
+        if (agent.remainingDistance < 0.5f && !agent.pathPending)
+        {
+            currentWaypoint = (currentWaypoint + 1) % waypoints.Length;
+            agent.SetDestination(waypoints[currentWaypoint].position);
+        }
+    }
+}
+```
+
+### 6.7.2 Simulating HRI Scenarios
+
+**Scenario 1: Service Robot in Cafe**
+
+```
+Environment:
+  - Cafe tables and chairs (Asset Store)
+  - NavMesh for human/robot navigation
+  - Coffee cups (grabbable objects)
+
+Agents:
+  - Humanoid service robot (from URDF)
+  - 3-5 human customers (Mixamo)
+
+Interaction:
+  1. Customer raises hand (gesture detection)
+  2. Robot navigates to table
+  3. Robot receives order (speech bubble UI)
+  4. Robot delivers coffee (manipulation)
+```
+
+**Scenario 2: Collaborative Assembly**:
+
+```
+Environment:
+  - Factory floor with assembly station
+  - Parts bins and tools
+
+Agents:
+  - Humanoid cobot (collaborative robot)
+  - Human worker
+
+Interaction:
+  1. Human picks part A, robot picks part B
+  2. Both approach assembly station
+  3. Robot waits for human (safety zone)
+  4. Hand-off part to human
+  5. Human completes assembly
+```
+
+**Implementing Safety Zones**:
+
+```csharp
+public class SafetyZone : MonoBehaviour
+{
+    public float detectionRadius = 2.0f; // meters
+    public ArticulationBody[] robotJoints;
+    private bool humanDetected = false;
+
+    void Update()
+    {
+        // Check for humans in proximity
+        Collider[] colliders = Physics.OverlapSphere(
+            transform.position, detectionRadius, LayerMask.GetMask("Human")
+        );
+
+        humanDetected = colliders.Length > 0;
+
+        if (humanDetected)
+        {
+            // Slow down robot movements
+            foreach (var joint in robotJoints)
+            {
+                ArticulationDrive drive = joint.xDrive;
+                drive.forceLimit = drive.forceLimit * 0.5f; // Reduce force
+                joint.xDrive = drive;
+            }
+        }
+    }
+
+    void OnDrawGizmos()
+    {
+        Gizmos.color = humanDetected ? Color.red : Color.green;
+        Gizmos.DrawWireSphere(transform.position, detectionRadius);
+    }
+}
+```
+
+### 6.7.3 Gesture and Gaze Tracking
+
+**Simple Gaze Direction**:
+
+```csharp
+public class GazeTracker : MonoBehaviour
+{
+    public Transform head;
+    public Transform gazeTarget; // What human is looking at
+
+    void Update()
+    {
+        if (gazeTarget != null)
+        {
+            Vector3 direction = (gazeTarget.position - head.position).normalized;
+            head.rotation = Quaternion.LookRotation(direction);
+        }
+    }
+
+    public bool IsLookingAt(Transform obj, float angleThreshold = 15f)
+    {
+        Vector3 toObject = (obj.position - head.position).normalized;
+        Vector3 gazeDir = head.forward;
+        float angle = Vector3.Angle(gazeDir, toObject);
+        return angle < angleThreshold;
+    }
+}
+```
+
+**Hand Gesture Recognition** (Simple):
+
+```csharp
+public class GestureDetector : MonoBehaviour
+{
+    public Transform rightHand;
+    public float raiseThreshold = 1.5f; // meters above ground
+
+    public bool IsHandRaised()
+    {
+        return rightHand.position.y > raiseThreshold;
+    }
+
+    public bool IsPointing(out Vector3 pointDirection)
+    {
+        // Check if arm is extended
+        float armLength = Vector3.Distance(rightHand.position, transform.position);
+        if (armLength > 0.6f) // Extended arm ~60cm
+        {
+            pointDirection = (rightHand.position - transform.position).normalized;
+            return true;
+        }
+        pointDirection = Vector3.zero;
+        return false;
+    }
+}
+```
+
+---
+
+## 6.8 Interactive Camera Systems
+
+### 6.8.1 Orbit Camera for Robot Inspection
+
+```csharp
+using UnityEngine;
+
+public class OrbitCamera : MonoBehaviour
+{
+    public Transform target; // Robot to orbit around
+    public float distance = 5.0f;
+    public float rotationSpeed = 100f;
+    public float zoomSpeed = 2f;
+
+    private float currentX = 0f;
+    private float currentY = 30f;
+
+    void Update()
+    {
+        // Mouse orbit
+        if (Input.GetMouseButton(1)) // Right mouse button
+        {
+            currentX += Input.GetAxis("Mouse X") * rotationSpeed * Time.deltaTime;
+            currentY -= Input.GetAxis("Mouse Y") * rotationSpeed * Time.deltaTime;
+            currentY = Mathf.Clamp(currentY, -80f, 80f); // Prevent flipping
+        }
+
+        // Mouse wheel zoom
+        distance -= Input.GetAxis("Mouse ScrollWheel") * zoomSpeed;
+        distance = Mathf.Clamp(distance, 1f, 20f);
+
+        UpdateCameraPosition();
+    }
+
+    void UpdateCameraPosition()
+    {
+        Quaternion rotation = Quaternion.Euler(currentY, currentX, 0);
+        Vector3 offset = rotation * (Vector3.back * distance);
+        transform.position = target.position + offset;
+        transform.LookAt(target);
+    }
+}
+```
+
+### 6.8.2 First-Person Robot View
+
+```csharp
+public class RobotEyeCamera : MonoBehaviour
+{
+    public Transform robotHead;
+    public Vector3 eyeOffset = new Vector3(0, 0.05f, 0.1f); // Offset from head center
+
+    void LateUpdate()
+    {
+        // Match robot head pose
+        transform.position = robotHead.TransformPoint(eyeOffset);
+        transform.rotation = robotHead.rotation;
+    }
+}
+```
+
+### 6.8.3 Cinematic Camera Paths
+
+```csharp
+using UnityEngine;
+
+public class CameraPath : MonoBehaviour
+{
+    public Transform[] waypoints;
+    public float speed = 2f;
+    public bool loop = true;
+
+    private int currentIndex = 0;
+    private float t = 0f;
+
+    void Update()
+    {
+        if (waypoints.Length < 2) return;
+
+        Transform start = waypoints[currentIndex];
+        Transform end = waypoints[(currentIndex + 1) % waypoints.Length];
+
+        // Smooth interpolation
+        t += Time.deltaTime * speed;
+        transform.position = Vector3.Lerp(start.position, end.position, t);
+        transform.rotation = Quaternion.Slerp(start.rotation, end.rotation, t);
+
+        if (t >= 1f)
+        {
+            currentIndex++;
+            t = 0f;
+
+            if (currentIndex >= waypoints.Length - 1 && !loop)
+            {
+                enabled = false; // Stop at end
+            }
+            else
+            {
+                currentIndex %= waypoints.Length;
+            }
+        }
+    }
+}
+```
+
+---
+
+## 6.9 Physics Integration with Unity PhysX
+
+### 6.9.1 ArticulationBody for Robot Joints
+
+Unity's **ArticulationBody** is optimized for robotic mechanisms.
+
+**Joint Types**:
+
+```csharp
+// Revolute joint (hinge)
+ArticulationBody shoulder = shoulderObject.AddComponent<ArticulationBody>();
+shoulder.jointType = ArticulationJointType.RevoluteJoint;
+shoulder.anchorPosition = Vector3.zero;
+shoulder.anchorRotation = Quaternion.identity;
+
+// Configure drive
+ArticulationDrive drive = shoulder.xDrive;
+drive.stiffness = 10000f;
+drive.damping = 500f;
+drive.forceLimit = 100f; // Nm
+shoulder.xDrive = drive;
+
+// Set joint limits
+shoulder.linearLockX = ArticulationDofLock.LockedMotion;
+shoulder.linearLockY = ArticulationDofLock.LockedMotion;
+shoulder.linearLockZ = ArticulationDofLock.LockedMotion;
+shoulder.swingYLock = ArticulationDofLock.LimitedMotion;
+shoulder.swingZLock = ArticulationDofLock.LockedMotion;
+shoulder.twistLock = ArticulationDofLock.LockedMotion;
+
+// Set limits (degrees)
+ArticulationDrive yDrive = shoulder.yDrive;
+yDrive.lowerLimit = -90f;
+yDrive.upperLimit = 90f;
+shoulder.yDrive = yDrive;
+```
+
+### 6.9.2 Collision Layers for Robots
+
+**Setup Collision Matrix**:
+
+```
+1. Edit > Project Settings > Tags and Layers
+2. Add layers:
+   - Layer 8: Robot
+   - Layer 9: Human
+   - Layer 10: Environment
+   - Layer 11: Tools
+
+3. Edit > Project Settings > Physics
+4. Layer Collision Matrix:
+   - Robot ↔ Environment: ✓
+   - Robot ↔ Human: ✓ (for safety detection)
+   - Robot ↔ Tools: ✓
+   - Human ↔ Environment: ✓
+   - Robot ↔ Robot: ✗ (no self-collision)
+```
+
+**Assign Layers Programmatically**:
+
+```csharp
+void AssignLayers(GameObject robot)
+{
+    robot.layer = LayerMask.NameToLayer("Robot");
+
+    // Recursively set children
+    foreach (Transform child in robot.transform)
+    {
+        child.gameObject.layer = LayerMask.NameToLayer("Robot");
+    }
+}
+```
+
+### 6.9.3 Grasping and Manipulation
+
+**Simple Gripper Controller**:
+
+```csharp
+public class SimpleGripper : MonoBehaviour
+{
+    public ArticulationBody leftFinger;
+    public ArticulationBody rightFinger;
+    public float openAngle = 30f;
+    public float closedAngle = 0f;
+
+    private bool isOpen = true;
+
+    public void ToggleGripper()
+    {
+        isOpen = !isOpen;
+        SetGripperState(isOpen);
+    }
+
+    void SetGripperState(bool open)
+    {
+        float targetAngle = open ? openAngle : closedAngle;
+
+        ArticulationDrive leftDrive = leftFinger.xDrive;
+        leftDrive.target = targetAngle;
+        leftFinger.xDrive = leftDrive;
+
+        ArticulationDrive rightDrive = rightFinger.xDrive;
+        rightDrive.target = -targetAngle; // Mirror angle
+        rightFinger.xDrive = rightDrive;
+    }
+}
+```
+
+**Object Attachment on Grasp**:
+
+```csharp
+public class GraspDetector : MonoBehaviour
+{
+    private GameObject graspedObject = null;
+
+    void OnTriggerEnter(Collider other)
+    {
+        if (other.CompareTag("Graspable") && graspedObject == null)
+        {
+            graspedObject = other.gameObject;
+
+            // Disable physics and attach to gripper
+            Rigidbody rb = graspedObject.GetComponent<Rigidbody>();
+            if (rb != null)
+            {
+                rb.isKinematic = true;
+            }
+            graspedObject.transform.SetParent(transform);
+        }
+    }
+
+    public void ReleaseObject()
+    {
+        if (graspedObject != null)
+        {
+            graspedObject.transform.SetParent(null);
+
+            Rigidbody rb = graspedObject.GetComponent<Rigidbody>();
+            if (rb != null)
+            {
+                rb.isKinematic = false;
+            }
+            graspedObject = null;
+        }
+    }
+}
+```
+
+---
+
+## 6.10 Virtual Reality (VR) Integration
+
+### 6.10.1 Why VR for Humanoid Robotics?
+
+**Use Cases**:
+1. **Teleoperation**: Control robot from VR headset perspective
+2. **Ergonomics Testing**: Experience robot's workspace from human viewpoint
+3. **HRI Evaluation**: Immersive testing of human-robot interactions
+4. **Training**: Teach robot behaviors through VR demonstrations
+
+### 6.10.2 Setting Up Unity XR
+
+**Install XR Plugin Management**:
+
+```
+1. Edit > Project Settings > XR Plugin Management
+2. Install XR Plugin Management
+3. Enable platform:
+   - Oculus (Meta Quest 2/3)
+   - OpenXR (SteamVR, HTC Vive)
+4. Install XR Interaction Toolkit
+```
+
+**Basic VR Rig**:
+
+```
+1. GameObject > XR > XR Origin (Action-based)
+2. Automatic setup:
+   - Main Camera (head tracking)
+   - Left Controller
+   - Right Controller
+3. Add XR Interaction Manager to scene
+```
+
+### 6.10.3 Teleoperation in VR
+
+**Map VR Controllers to Robot Arms**:
+
+```csharp
+using UnityEngine;
+using UnityEngine.XR;
+
+public class VRTeleoperation : MonoBehaviour
+{
+    public Transform vrLeftHand;
+    public Transform vrRightHand;
+    public Transform robotLeftHand;
+    public Transform robotRightHand;
+
+    public float positionScale = 1.0f; // Scale VR movements to robot
+    private Vector3 leftHandInitial;
+    private Vector3 rightHandInitial;
+
+    void Start()
+    {
+        leftHandInitial = vrLeftHand.localPosition;
+        rightHandInitial = vrRightHand.localPosition;
+    }
+
+    void Update()
+    {
+        // Map VR hand movements to robot hands
+        Vector3 leftDelta = vrLeftHand.localPosition - leftHandInitial;
+        Vector3 rightDelta = vrRightHand.localPosition - rightHandInitial;
+
+        // Apply to robot (with scaling)
+        robotLeftHand.localPosition += leftDelta * positionScale;
+        robotRightHand.localPosition += rightDelta * positionScale;
+
+        // Mirror orientations
+        robotLeftHand.rotation = vrLeftHand.rotation;
+        robotRightHand.rotation = vrRightHand.rotation;
+    }
+}
+```
+
+**VR Gripper Control**:
+
+```csharp
+using UnityEngine.XR.Interaction.Toolkit;
+
+public class VRGripperControl : MonoBehaviour
+{
+    public ActionBasedController controller;
+    public SimpleGripper gripper;
+
+    void Start()
+    {
+        controller.activateAction.action.performed += ctx => gripper.ToggleGripper();
+    }
+}
+```
+
+---
+
+## 6.11 Optimization for Real-Time Performance
+
+### 6.11.1 Profiling Tools
+
+**Unity Profiler**:
+
+```
+Window > Analysis > Profiler
+
+Key metrics:
+- CPU: Main thread, Render thread
+- GPU: Rendering time
+- Memory: Heap allocations
+- Physics: Simulation time
+
+Target: 60 FPS (16.6 ms/frame)
+```
+
+**Frame Debugger**:
+
+```
+Window > Analysis > Frame Debugger
+
+Shows:
+- Draw call sequence
+- Shader passes
+- Batching efficiency
+```
+
+### 6.11.2 Optimization Techniques
+
+**1. Level of Detail (LOD)**:
+
+```csharp
+// Add LOD Group to robot
+LODGroup lodGroup = robotObject.AddComponent<LODGroup>();
+
+LOD[] lods = new LOD[3];
+
+// LOD 0: High detail (0-10m)
+lods[0] = new LOD(0.1f, new Renderer[] { highDetailRenderer });
+
+// LOD 1: Medium detail (10-20m)
+lods[1] = new LOD(0.05f, new Renderer[] { mediumDetailRenderer });
+
+// LOD 2: Low detail (20-30m)
+lods[2] = new LOD(0.01f, new Renderer[] { lowDetailRenderer });
+
+lodGroup.SetLODs(lods);
+lodGroup.RecalculateBounds();
+```
+
+**2. Occlusion Culling**:
+
+```
+1. Window > Rendering > Occlusion Culling
+2. Select objects marked as "Occluder Static"
+3. Bake occlusion data
+4. Camera will skip rendering occluded objects
+```
+
+**3. Batching**:
+
+```
+Edit > Project Settings > Player > Other Settings
+
+- Static Batching: On (for static environment)
+- Dynamic Batching: On (for moving objects <300 verts)
+- GPU Instancing: On (for repeated objects)
+- SRP Batcher: On (URP/HDRP)
+```
+
+**4. Reduce Shadow Quality**:
+
+```csharp
+// Programmatic shadow control
+Light mainLight = GetComponent<Light>();
+mainLight.shadows = LightShadows.Soft;
+mainLight.shadowResolution = UnityEngine.Rendering.LightShadowResolution.Medium;
+
+// Adjust shadow distance
+QualitySettings.shadowDistance = 30f; // meters
+```
+
+### 6.11.3 Physics Optimization
+
+```csharp
+// Reduce physics update rate if visualization-only
+Time.fixedDeltaTime = 0.02f; // 50 Hz instead of 100 Hz
+
+// Simplify collision detection
+Physics.defaultSolverIterations = 6; // Default is 6
+Physics.defaultSolverVelocityIterations = 1; // Default is 1
+
+// Use continuous collision detection only where needed
+ArticulationBody body = GetComponent<ArticulationBody>();
+body.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
+```
+
+---
+
+## 6.12 Example: Complete Unity-ROS 2 Humanoid Scene
+
+### 6.12.1 Scene Setup Checklist
+
+**Hierarchy Structure**:
+
+```
+HumanoidScene
+├── Lighting
+│   ├── Directional Light (Sun)
+│   ├── Fill Light
+│   └── Rim Light
+├── Environment
+│   ├── Ground Plane
+│   ├── Walls
+│   └── Props (tables, chairs)
+├── Robot
+│   ├── HumanoidRobot (URDF imported)
+│   ├── JointStateSubscriber (script)
+│   └── SafetyZone (script)
+├── Humans
+│   ├── Human1 (NavMeshAgent)
+│   └── Human2 (NavMeshAgent)
+├── Cameras
+│   ├── Main Camera (Orbit)
+│   ├── Robot Eye Camera
+│   └── Cinematic Camera
+├── ROS Connection
+│   └── ROSConnection (script)
+└── UI
+    ├── Canvas
+    └── Status Text
+```
+
+### 6.12.2 Complete Integration Script
+
+```csharp
+using UnityEngine;
+using Unity.Robotics.ROSTCPConnector;
+using RosMessageTypes.Sensor;
+using RosMessageTypes.Std;
+
+public class HumanoidVisualizer : MonoBehaviour
+{
+    [Header("ROS Configuration")]
+    public string rosIPAddress = "127.0.0.1";
+    public int rosPort = 10000;
+
+    [Header("Robot Components")]
+    public GameObject robotPrefab;
+    private GameObject robotInstance;
+    private ArticulationBody[] joints;
+
+    [Header("Visualization")]
+    public Material defaultMaterial;
+    public Material alertMaterial;
+
+    private ROSConnection ros;
+    private bool isConnected = false;
+
+    void Start()
+    {
+        // Initialize ROS connection
+        ros = ROSConnection.GetOrCreateInstance();
+        ros.ConnectOnStart = false;
+        ros.RosIPAddress = rosIPAddress;
+        ros.RosPort = rosPort;
+        ros.Connect();
+
+        // Subscribe to topics
+        ros.Subscribe<JointStateMsg>("/joint_states", OnJointStateReceived);
+        ros.Subscribe<StringMsg>("/robot/status", OnStatusReceived);
+
+        // Instantiate robot
+        robotInstance = Instantiate(robotPrefab, Vector3.zero, Quaternion.identity);
+        joints = robotInstance.GetComponentsInChildren<ArticulationBody>();
+
+        Debug.Log($"Initialized with {joints.Length} articulation bodies");
+    }
+
+    void OnJointStateReceived(JointStateMsg msg)
+    {
+        for (int i = 0; i < msg.name.Length && i < joints.Length; i++)
+        {
+            if (joints[i] != null)
+            {
+                ArticulationDrive drive = joints[i].xDrive;
+                drive.target = (float)msg.position[i] * Mathf.Rad2Deg;
+                joints[i].xDrive = drive;
+            }
+        }
+    }
+
+    void OnStatusReceived(StringMsg msg)
+    {
+        Debug.Log($"Robot status: {msg.data}");
+
+        // Change robot color based on status
+        if (msg.data == "alert")
+        {
+            SetRobotMaterial(alertMaterial);
+        }
+        else
+        {
+            SetRobotMaterial(defaultMaterial);
+        }
+    }
+
+    void SetRobotMaterial(Material mat)
+    {
+        foreach (var renderer in robotInstance.GetComponentsInChildren<Renderer>())
+        {
+            renderer.material = mat;
+        }
+    }
+
+    void OnDestroy()
+    {
+        if (ros != null)
+        {
+            ros.Disconnect();
+        }
+    }
+}
+```
+
+---
+
+## 6.13 Best Practices for Unity Robotics Visualization
+
+### 1. Coordinate System Consistency
+
+Always convert between Unity (Y-up, left-handed) and ROS (Z-up, right-handed):
+
+```csharp
+public static class CoordinateConverter
+{
+    // Unity to ROS
+    public static Vector3 UnityToROS(Vector3 unityVec)
+    {
+        return new Vector3(unityVec.z, -unityVec.x, unityVec.y);
+    }
+
+    // ROS to Unity
+    public static Vector3 ROSToUnity(Vector3 rosVec)
+    {
+        return new Vector3(-rosVec.y, rosVec.z, rosVec.x);
+    }
+
+    // Unity to ROS (Quaternion)
+    public static Quaternion UnityToROS(Quaternion unityQuat)
+    {
+        return new Quaternion(unityQuat.z, -unityQuat.x, unityQuat.y, unityQuat.w);
+    }
+}
+```
+
+### 2. Use Prefabs for Reusability
+
+Create prefabs for:
+- Complete robot assemblies
+- Environment components (tables, chairs)
+- Human characters with animations
+- Camera rigs
+
+### 3. Separate Visual and Collision Geometry
+
+```
+Robot
+├── Visual (high-poly meshes)
+│   └── MeshRenderer
+└── Collision (simple shapes)
+    └── ArticulationBody + Colliders
+```
+
+### 4. Version Control with Git LFS
+
+Unity projects are large. Use Git LFS:
+
+```bash
+# Install Git LFS
+git lfs install
+
+# Track large files
+git lfs track "*.fbx"
+git lfs track "*.png"
+git lfs track "*.unity"
+git lfs track "*.prefab"
+
+# Commit .gitattributes
+git add .gitattributes
+git commit -m "Setup Git LFS"
+```
+
+### 5. Performance Budgeting
+
+Set targets for real-time performance:
+
+```
+Frame budget: 16.6 ms (60 FPS)
+- Physics: 3 ms
+- Rendering: 10 ms
+- Scripts: 2 ms
+- Other: 1.6 ms
+
+Draw calls: <500
+Triangles: <1M on screen
+Texture memory: <2 GB
+```
+
+---
+
+## 6.14 Troubleshooting Common Issues
+
+### Issue 1: URDF Import Fails
+
+**Symptoms**: Missing meshes, incorrect transforms
+
+**Solutions**:
+1. Check mesh file paths in URDF (use absolute or `package://`)
+2. Ensure all mesh files (.dae, .stl) are in correct directories
+3. Verify URDF syntax with `check_urdf` (ROS tool)
+4. Use Y-up axis conversion in import settings
+
+### Issue 2: ArticulationBody Instability
+
+**Symptoms**: Jittering, exploding joints
+
+**Solutions**:
+```csharp
+// Increase solver iterations
+ArticulationBody body = GetComponent<ArticulationBody>();
+body.solverIterations = 20;
+body.solverVelocityIterations = 10;
+
+// Reduce drive stiffness
+ArticulationDrive drive = body.xDrive;
+drive.stiffness = 1000f; // Lower value
+drive.damping = 100f;
+body.xDrive = drive;
+
+// Enable continuous collision detection
+body.collisionDetectionMode = CollisionDetectionMode.Continuous;
+```
+
+### Issue 3: ROS Connection Timeouts
+
+**Symptoms**: "Connection refused" or timeout errors
+
+**Solutions**:
+1. Verify ROS-TCP-Endpoint is running:
+   ```bash
+   ros2 run ros_tcp_endpoint default_server_endpoint
+   ```
+2. Check firewall settings (open port 10000)
+3. Use correct IP address:
+   - Same machine: `127.0.0.1`
+   - Network: `192.168.x.x` (local IP)
+4. Test connection:
+   ```bash
+   nc -zv 127.0.0.1 10000
+   ```
+
+### Issue 4: Low FPS / Performance
+
+**Solutions**:
+1. Reduce shadow quality and distance
+2. Enable occlusion culling
+3. Use LOD groups
+4. Lower physics update rate
+5. Reduce post-processing effects
+6. Profile with Unity Profiler to identify bottleneck
+
+---
+
+## 6.15 Summary
+
+In this chapter, we covered:
+
+- ✅ Unity's role in high-fidelity robotics visualization
+- ✅ Unity Robotics Hub installation and setup
+- ✅ ROS 2-Unity communication via ROS-TCP-Endpoint
+- ✅ URDF import and ArticulationBody configuration
+- ✅ Real-time robot state synchronization
+- ✅ Photorealistic rendering with URP/HDRP
+- ✅ Human-robot interaction scenario design
+- ✅ VR integration for teleoperation
+- ✅ Performance optimization techniques
+- ✅ Best practices and troubleshooting
+
+### Key Takeaways
+
+1. **Unity complements Gazebo**: Use Gazebo for physics-accurate simulation, Unity for visualization and HRI
+2. **ArticulationBody is optimized for robots**: More stable than Rigidbody + ConfigurableJoint
+3. **Coordinate conversions are critical**: Always convert between Unity (Y-up) and ROS (Z-up)
+4. **Real-time performance requires optimization**: Use LOD, occlusion culling, and efficient materials
+5. **HRI scenarios test robot behaviors**: Simulate realistic human interactions before deployment
+6. **VR enables immersive testing**: Experience robot workspace from human perspective
+
+---
+
+## Further Reading
+
+1. Unity Robotics Hub: [github.com/Unity-Technologies/Unity-Robotics-Hub](https://github.com/Unity-Technologies/Unity-Robotics-Hub)
+2. Unity URDF Importer: [github.com/Unity-Technologies/URDF-Importer](https://github.com/Unity-Technologies/URDF-Importer)
+3. ArticulationBody Documentation: Unity Manual, Physics Section
+4. Universal Render Pipeline (URP): Unity Documentation
+5. VR Best Practices: Oculus Developer Center, Unity XR Interaction Toolkit
+6. Hoffman, G., & Zhao, X. (2020). A primer for conducting experiments in human–robot interaction. *ACM Transactions on Human-Robot Interaction, 10*(1), 1-31.
+
+---
+
+## Next Steps
+
+In **Chapter 7**, we'll explore the **NVIDIA Isaac Platform**, which combines Unity-like visualization with Gazebo-level physics simulation, plus advanced AI training capabilities through Isaac Sim and Isaac SDK. We'll see how Isaac's photorealistic rendering and synthetic data generation enable training perception models for humanoid robots.
+
+:::tip Hands-On Exercise
+Create a Unity scene with:
+1. Import your humanoid URDF from Chapter 3
+2. Set up ROS 2 connection to subscribe to `/joint_states`
+3. Add a human character with NavMesh navigation
+4. Implement a simple HRI scenario (e.g., handshake)
+5. Record a 30-second video showcasing the interaction
+:::

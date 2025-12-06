@@ -1,0 +1,1255 @@
+---
+sidebar_position: 5
+title: Chapter 5 - Gazebo Environment Setup
+---
+
+# Chapter 5: Gazebo Environment Setup
+
+## Learning Objectives
+
+By the end of this chapter, you will be able to:
+
+1. Understand the structure and syntax of URDF and SDF file formats
+2. Create and configure Gazebo world files with custom environments
+3. Convert between URDF and SDF formats for robot models
+4. Spawn robots and objects into Gazebo simulations programmatically
+5. Design realistic environments with proper physics, lighting, and terrain
+6. Integrate Gazebo with ROS 2 for robot control and sensing
+7. Debug common issues in Gazebo simulations
+
+---
+
+## 5.1 Introduction to Gazebo
+
+**Gazebo** is an open-source 3D robotics simulator that provides:
+- High-fidelity physics simulation
+- Sensor simulation (cameras, LiDAR, IMU, etc.)
+- Realistic rendering with lighting and shadows
+- Integration with ROS 2 through `ros_gz` bridge
+- Plugin architecture for custom functionality
+
+### Gazebo vs. Other Simulators
+
+| Feature | Gazebo | Isaac Sim | Unity |
+|---------|--------|-----------|-------|
+| **Open Source** | Yes | No | Partial |
+| **Physics Engines** | ODE, Bullet, DART, Simbody | PhysX | PhysX |
+| **ROS 2 Integration** | Native (ros_gz) | ROS 2 bridge | ROS TCP/UDP |
+| **Photorealism** | Moderate | Excellent | Excellent |
+| **Best For** | General robotics, research | AI training, vision | Visualization, VR/AR |
+
+:::info Gazebo Evolution
+Gazebo has undergone significant evolution. **Gazebo Classic** (versions 1-11) is being replaced by **Gazebo Sim** (formerly Ignition Gazebo), which offers improved architecture, better performance, and modern rendering. This chapter focuses on **Gazebo Sim** (Harmonic release), which is the recommended version for ROS 2 Humble and beyond.
+:::
+
+---
+
+## 5.2 URDF: Unified Robot Description Format
+
+**URDF (Unified Robot Description Format)** is an XML-based format for describing robot structures in ROS.
+
+### 5.2.1 URDF Structure
+
+A URDF file consists of **links** (rigid bodies) and **joints** (connections between links).
+
+**Minimal URDF Example**:
+```xml
+<?xml version="1.0"?>
+<robot name="simple_robot">
+  <!-- Base link (required root link) -->
+  <link name="base_link">
+    <visual>
+      <geometry>
+        <box size="0.5 0.3 0.2"/>
+      </geometry>
+      <material name="blue">
+        <color rgba="0 0 1 1"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.5 0.3 0.2"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="10.0"/>
+      <inertia ixx="0.1" ixy="0.0" ixz="0.0"
+               iyy="0.2" iyz="0.0" izz="0.15"/>
+    </inertial>
+  </link>
+
+  <!-- Wheel link -->
+  <link name="wheel">
+    <visual>
+      <geometry>
+        <cylinder radius="0.1" length="0.05"/>
+      </geometry>
+      <material name="black">
+        <color rgba="0 0 0 1"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <cylinder radius="0.1" length="0.05"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="1.0"/>
+      <inertia ixx="0.01" ixy="0.0" ixz="0.0"
+               iyy="0.01" iyz="0.0" izz="0.005"/>
+    </inertial>
+  </link>
+
+  <!-- Joint connecting base to wheel -->
+  <joint name="wheel_joint" type="continuous">
+    <parent link="base_link"/>
+    <child link="wheel"/>
+    <origin xyz="0.2 0 -0.1" rpy="0 1.57 0"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+</robot>
+```
+
+### 5.2.2 Link Elements
+
+Each `<link>` contains three main components:
+
+**1. Visual** (appearance):
+```xml
+<visual>
+  <origin xyz="0 0 0" rpy="0 0 0"/>
+  <geometry>
+    <mesh filename="package://robot_description/meshes/torso.dae"/>
+    <!-- OR primitives: box, cylinder, sphere -->
+  </geometry>
+  <material name="grey">
+    <color rgba="0.5 0.5 0.5 1.0"/>
+  </material>
+</visual>
+```
+
+**2. Collision** (physics):
+```xml
+<collision>
+  <origin xyz="0 0 0" rpy="0 0 0"/>
+  <geometry>
+    <box size="0.4 0.3 0.6"/>  <!-- Simplified for performance -->
+  </geometry>
+</collision>
+```
+
+**3. Inertial** (dynamics):
+```xml
+<inertial>
+  <mass value="15.0"/>  <!-- kg -->
+  <origin xyz="0 0 0.3" rpy="0 0 0"/>  <!-- Center of mass -->
+  <inertia ixx="0.3" ixy="0.0" ixz="0.0"
+           iyy="0.25" iyz="0.0" izz="0.1"/>
+</inertial>
+```
+
+:::tip Inertia Calculation
+For simple shapes, inertia tensors can be calculated analytically:
+- **Box**: `Ixx = (1/12) * m * (h² + d²)`
+- **Cylinder**: `Izz = (1/2) * m * r²`
+- **Sphere**: `I = (2/5) * m * r²`
+
+For complex meshes, use CAD software (SolidWorks, Fusion 360) to compute inertial properties automatically.
+:::
+
+### 5.2.3 Joint Types
+
+**Joint Types in URDF**:
+
+1. **Fixed**: No motion (e.g., sensors attached to robot body)
+   ```xml
+   <joint name="camera_joint" type="fixed">
+     <parent link="head"/>
+     <child link="camera"/>
+     <origin xyz="0.1 0 0.05" rpy="0 0 0"/>
+   </joint>
+   ```
+
+2. **Revolute**: Rotational motion with limits
+   ```xml
+   <joint name="elbow_joint" type="revolute">
+     <parent link="upper_arm"/>
+     <child link="forearm"/>
+     <origin xyz="0 0 0.3" rpy="0 0 0"/>
+     <axis xyz="0 1 0"/>  <!-- Rotation axis -->
+     <limit lower="-2.0" upper="2.0" effort="50" velocity="2.0"/>
+   </joint>
+   ```
+
+3. **Continuous**: Unlimited rotation (e.g., wheels)
+   ```xml
+   <joint name="wheel_joint" type="continuous">
+     <axis xyz="0 1 0"/>
+     <limit effort="10" velocity="5.0"/>
+   </joint>
+   ```
+
+4. **Prismatic**: Linear sliding motion
+   ```xml
+   <joint name="lift_joint" type="prismatic">
+     <axis xyz="0 0 1"/>
+     <limit lower="0.0" upper="0.5" effort="100" velocity="0.5"/>
+   </joint>
+   ```
+
+### 5.2.4 Humanoid URDF Example
+
+**Simplified Humanoid Torso and Arm**:
+```xml
+<?xml version="1.0"?>
+<robot name="humanoid_upper_body">
+  <!-- Torso -->
+  <link name="torso">
+    <visual>
+      <geometry>
+        <box size="0.4 0.25 0.6"/>
+      </geometry>
+      <material name="white">
+        <color rgba="1 1 1 1"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.4 0.25 0.6"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="20.0"/>
+      <inertia ixx="0.8" ixy="0" ixz="0"
+               iyy="0.9" iyz="0" izz="0.4"/>
+    </inertial>
+  </link>
+
+  <!-- Shoulder -->
+  <link name="shoulder">
+    <visual>
+      <geometry>
+        <sphere radius="0.06"/>
+      </geometry>
+    </visual>
+    <collision>
+      <geometry>
+        <sphere radius="0.06"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.5"/>
+      <inertia ixx="0.001" ixy="0" ixz="0"
+               iyy="0.001" iyz="0" izz="0.001"/>
+    </inertial>
+  </link>
+
+  <!-- Shoulder joint (pitch) -->
+  <joint name="shoulder_pitch" type="revolute">
+    <parent link="torso"/>
+    <child link="shoulder"/>
+    <origin xyz="0 0.15 0.2" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-1.57" upper="3.14" effort="50" velocity="2.0"/>
+  </joint>
+
+  <!-- Upper arm -->
+  <link name="upper_arm">
+    <visual>
+      <geometry>
+        <cylinder radius="0.04" length="0.3"/>
+      </geometry>
+    </visual>
+    <collision>
+      <geometry>
+        <cylinder radius="0.04" length="0.3"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="2.0"/>
+      <origin xyz="0 0 -0.15"/>
+      <inertia ixx="0.015" ixy="0" ixz="0"
+               iyy="0.015" iyz="0" izz="0.002"/>
+    </inertial>
+  </link>
+
+  <!-- Shoulder to upper arm (roll) -->
+  <joint name="shoulder_roll" type="revolute">
+    <parent link="shoulder"/>
+    <child link="upper_arm"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-1.57" upper="1.57" effort="40" velocity="2.0"/>
+  </joint>
+
+  <!-- Forearm -->
+  <link name="forearm">
+    <visual>
+      <geometry>
+        <cylinder radius="0.035" length="0.25"/>
+      </geometry>
+    </visual>
+    <collision>
+      <geometry>
+        <cylinder radius="0.035" length="0.25"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="1.5"/>
+      <origin xyz="0 0 -0.125"/>
+      <inertia ixx="0.008" ixy="0" ixz="0"
+               iyy="0.008" iyz="0" izz="0.001"/>
+    </inertial>
+  </link>
+
+  <!-- Elbow joint -->
+  <joint name="elbow" type="revolute">
+    <parent link="upper_arm"/>
+    <child link="forearm"/>
+    <origin xyz="0 0 -0.3" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0" upper="2.5" effort="30" velocity="2.0"/>
+  </joint>
+</robot>
+```
+
+---
+
+## 5.3 SDF: Simulation Description Format
+
+**SDF (Simulation Description Format)** is Gazebo's native format. It's more expressive than URDF and supports:
+- Multiple robots in one file
+- Nested models
+- Plugins for sensors and controllers
+- World descriptions (lighting, terrain, physics)
+
+### 5.3.1 SDF vs URDF
+
+| Feature | URDF | SDF |
+|---------|------|-----|
+| **Multiple robots** | No | Yes |
+| **Plugins** | Limited | Extensive |
+| **World description** | No | Yes |
+| **Complexity** | Simple | More flexible |
+| **ROS compatibility** | Native | Via conversion |
+
+### 5.3.2 SDF Model Structure
+
+**Simple SDF Robot**:
+```xml
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <model name="simple_robot">
+    <pose>0 0 0.5 0 0 0</pose>
+    <static>false</static>
+
+    <!-- Base link -->
+    <link name="base">
+      <pose>0 0 0 0 0 0</pose>
+      <inertial>
+        <mass>10.0</mass>
+        <inertia>
+          <ixx>0.1</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.2</iyy>
+          <iyz>0</iyz>
+          <izz>0.15</izz>
+        </inertia>
+      </inertial>
+
+      <visual name="base_visual">
+        <geometry>
+          <box>
+            <size>0.5 0.3 0.2</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0 0 1 1</ambient>
+          <diffuse>0 0 1 1</diffuse>
+        </material>
+      </visual>
+
+      <collision name="base_collision">
+        <geometry>
+          <box>
+            <size>0.5 0.3 0.2</size>
+          </box>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+    </link>
+
+    <!-- Wheel link -->
+    <link name="wheel">
+      <pose>0.2 0 -0.1 0 1.57 0</pose>
+      <inertial>
+        <mass>1.0</mass>
+        <inertia>
+          <ixx>0.01</ixx>
+          <iyy>0.01</iyy>
+          <izz>0.005</izz>
+        </inertia>
+      </inertial>
+
+      <visual name="wheel_visual">
+        <geometry>
+          <cylinder>
+            <radius>0.1</radius>
+            <length>0.05</length>
+          </cylinder>
+        </geometry>
+      </visual>
+
+      <collision name="wheel_collision">
+        <geometry>
+          <cylinder>
+            <radius>0.1</radius>
+            <length>0.05</length>
+          </cylinder>
+        </geometry>
+      </collision>
+    </link>
+
+    <!-- Joint -->
+    <joint name="wheel_joint" type="revolute">
+      <parent>base</parent>
+      <child>wheel</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <effort>10</effort>
+          <velocity>5.0</velocity>
+        </limit>
+      </axis>
+    </joint>
+
+    <!-- Camera sensor plugin -->
+    <link name="camera_link">
+      <pose>0.25 0 0.1 0 0 0</pose>
+      <sensor name="camera" type="camera">
+        <camera>
+          <horizontal_fov>1.047</horizontal_fov>
+          <image>
+            <width>640</width>
+            <height>480</height>
+          </image>
+          <clip>
+            <near>0.1</near>
+            <far>100</far>
+          </clip>
+        </camera>
+        <always_on>1</always_on>
+        <update_rate>30</update_rate>
+      </sensor>
+    </link>
+
+    <joint name="camera_joint" type="fixed">
+      <parent>base</parent>
+      <child>camera_link</child>
+    </joint>
+  </model>
+</sdf>
+```
+
+---
+
+## 5.4 Converting Between URDF and SDF
+
+### 5.4.1 URDF to SDF Conversion
+
+Gazebo automatically converts URDF to SDF when loading. You can also manually convert:
+
+**Using `gz` command-line tool**:
+```bash
+# Convert URDF to SDF
+gz sdf -p robot.urdf > robot.sdf
+
+# Validate SDF file
+gz sdf --check robot.sdf
+```
+
+**Programmatic Conversion in Python**:
+```python
+import subprocess
+
+def urdf_to_sdf(urdf_path, sdf_path):
+    """Convert URDF file to SDF format."""
+    try:
+        result = subprocess.run(
+            ['gz', 'sdf', '-p', urdf_path],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        with open(sdf_path, 'w') as f:
+            f.write(result.stdout)
+        print(f"Converted {urdf_path} to {sdf_path}")
+    except subprocess.CalledProcessError as e:
+        print(f"Conversion failed: {e.stderr}")
+
+# Usage
+urdf_to_sdf('humanoid.urdf', 'humanoid.sdf')
+```
+
+### 5.4.2 Key Differences During Conversion
+
+**URDF Feature → SDF Equivalent**:
+
+1. **Materials**: URDF `<color>` → SDF `<material><ambient>` and `<diffuse>`
+2. **Transmission**: Not directly supported in SDF (use plugins)
+3. **Gazebo tags**: URDF `<gazebo>` tags are processed during conversion
+4. **Plugins**: Must be added to SDF explicitly
+
+---
+
+## 5.5 Gazebo World Files
+
+A **world file** defines the complete simulation environment: terrain, lighting, physics, and models.
+
+### 5.5.1 Basic World Structure
+
+```xml
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <world name="humanoid_world">
+    <!-- Physics configuration -->
+    <physics name="1ms" type="ode">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+      <real_time_update_rate>1000</real_time_update_rate>
+    </physics>
+
+    <!-- Gravity -->
+    <gravity>0 0 -9.81</gravity>
+
+    <!-- Magnetic field (for compass sensors) -->
+    <magnetic_field>6e-6 2.3e-5 -4.2e-5</magnetic_field>
+
+    <!-- Atmosphere (for drag calculations) -->
+    <atmosphere type="adiabatic"/>
+
+    <!-- Scene settings -->
+    <scene>
+      <ambient>0.4 0.4 0.4 1</ambient>
+      <background>0.7 0.7 0.7 1</background>
+      <shadows>true</shadows>
+      <grid>false</grid>
+    </scene>
+
+    <!-- Sun (directional light) -->
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <attenuation>
+        <range>1000</range>
+        <constant>0.9</constant>
+        <linear>0.01</linear>
+        <quadratic>0.001</quadratic>
+      </attenuation>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+
+    <!-- Ground plane -->
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>100 100</size>
+            </plane>
+          </geometry>
+          <surface>
+            <friction>
+              <ode>
+                <mu>1.0</mu>
+                <mu2>1.0</mu2>
+              </ode>
+            </friction>
+          </surface>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>100 100</size>
+            </plane>
+          </geometry>
+          <material>
+            <ambient>0.8 0.8 0.8 1</ambient>
+            <diffuse>0.8 0.8 0.8 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+  </world>
+</sdf>
+```
+
+### 5.5.2 Advanced Lighting
+
+**Multiple Light Sources**:
+```xml
+<!-- Point light (e.g., ceiling lamp) -->
+<light type="point" name="ceiling_light">
+  <pose>0 0 3 0 0 0</pose>
+  <diffuse>0.9 0.9 0.7 1</diffuse>
+  <specular>0.1 0.1 0.1 1</specular>
+  <attenuation>
+    <range>20</range>
+    <constant>0.5</constant>
+    <linear>0.01</linear>
+    <quadratic>0.001</quadratic>
+  </attenuation>
+  <cast_shadows>false</cast_shadows>
+</light>
+
+<!-- Spot light (e.g., flashlight) -->
+<light type="spot" name="spot_light">
+  <pose>2 2 2 0 0.5 -0.5</pose>
+  <diffuse>1 1 1 1</diffuse>
+  <specular>0.2 0.2 0.2 1</specular>
+  <direction>-1 -1 -1</direction>
+  <attenuation>
+    <range>30</range>
+    <linear>0.01</linear>
+    <quadratic>0.0001</quadratic>
+  </attenuation>
+  <spot>
+    <inner_angle>0.6</inner_angle>
+    <outer_angle>1.0</outer_angle>
+    <falloff>1.0</falloff>
+  </spot>
+  <cast_shadows>true</cast_shadows>
+</light>
+```
+
+:::tip Lighting for Vision Tasks
+For computer vision tasks (object detection, SLAM), proper lighting is critical:
+- Use **ambient** light for minimum visibility: 0.4-0.6
+- Add **directional** light for shadows and depth perception
+- **Point lights** for indoor scenes
+- Avoid over-saturated lighting (diffuse > 0.9) which washes out details
+:::
+
+---
+
+## 5.6 Creating Complex Environments
+
+### 5.6.1 Building Models in World Files
+
+**Adding a Box Obstacle**:
+```xml
+<model name="box_obstacle">
+  <pose>2 0 0.25 0 0 0</pose>
+  <static>true</static>
+  <link name="link">
+    <collision name="collision">
+      <geometry>
+        <box>
+          <size>0.5 0.5 0.5</size>
+        </box>
+      </geometry>
+    </collision>
+    <visual name="visual">
+      <geometry>
+        <box>
+          <size>0.5 0.5 0.5</size>
+        </box>
+      </geometry>
+      <material>
+        <ambient>0.8 0.3 0.3 1</ambient>
+        <diffuse>0.8 0.3 0.3 1</diffuse>
+      </material>
+    </visual>
+  </link>
+</model>
+```
+
+**Including External Models**:
+```xml
+<!-- Include model from Gazebo model database -->
+<include>
+  <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Table</uri>
+  <name>table_1</name>
+  <pose>1 2 0 0 0 0</pose>
+</include>
+
+<!-- Include model from local path -->
+<include>
+  <uri>model://my_custom_chair</uri>
+  <name>chair_1</name>
+  <pose>-1 2 0 0 0 1.57</pose>
+</include>
+```
+
+### 5.6.2 Heightmap Terrain
+
+**Creating Terrain from Heightmap Image**:
+```xml
+<model name="terrain">
+  <static>true</static>
+  <link name="link">
+    <collision name="collision">
+      <geometry>
+        <heightmap>
+          <uri>file://terrain_heightmap.png</uri>
+          <size>50 50 10</size>  <!-- Width, depth, max height -->
+          <pos>0 0 0</pos>
+        </heightmap>
+      </geometry>
+    </collision>
+    <visual name="visual">
+      <geometry>
+        <heightmap>
+          <uri>file://terrain_heightmap.png</uri>
+          <size>50 50 10</size>
+          <texture>
+            <diffuse>file://grass_texture.jpg</diffuse>
+            <normal>file://grass_normal.jpg</normal>
+            <size>10</size>  <!-- Texture repeat scale -->
+          </texture>
+        </heightmap>
+      </geometry>
+    </visual>
+  </link>
+</model>
+```
+
+**Generating Heightmap in Python**:
+```python
+import numpy as np
+from PIL import Image
+
+def generate_terrain_heightmap(width=256, height=256, scale=10.0):
+    """Generate random terrain heightmap."""
+    # Create Perlin-like noise (simplified)
+    x = np.linspace(0, scale, width)
+    y = np.linspace(0, scale, height)
+    X, Y = np.meshgrid(x, y)
+
+    # Combine multiple sine waves for terrain variation
+    Z = (np.sin(X) + np.sin(Y) +
+         0.5 * np.sin(2*X) + 0.5 * np.sin(2*Y) +
+         0.25 * np.sin(4*X) + 0.25 * np.sin(4*Y))
+
+    # Normalize to 0-255
+    Z = ((Z - Z.min()) / (Z.max() - Z.min()) * 255).astype(np.uint8)
+
+    # Save as grayscale image
+    img = Image.fromarray(Z, mode='L')
+    img.save('terrain_heightmap.png')
+    print("Heightmap saved to terrain_heightmap.png")
+
+generate_terrain_heightmap()
+```
+
+---
+
+## 5.7 Spawning Robots in Gazebo
+
+### 5.7.1 Spawning via Launch Files
+
+**ROS 2 Launch File with Gazebo**:
+```python
+# spawn_humanoid.launch.py
+import os
+from launch import LaunchDescription
+from launch.actions import IncludeLaunchDescription, ExecuteProcess
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch_ros.actions import Node
+from ament_index_python.packages import get_package_share_directory
+
+def generate_launch_description():
+    # Paths
+    pkg_gazebo_ros = get_package_share_directory('gazebo_ros')
+    pkg_robot_description = get_package_share_directory('humanoid_description')
+
+    world_file = os.path.join(pkg_robot_description, 'worlds', 'humanoid_world.sdf')
+    urdf_file = os.path.join(pkg_robot_description, 'urdf', 'humanoid.urdf')
+
+    # Read URDF
+    with open(urdf_file, 'r') as f:
+        robot_desc = f.read()
+
+    # Gazebo server (simulation)
+    gzserver = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(pkg_gazebo_ros, 'launch', 'gzserver.launch.py')
+        ),
+        launch_arguments={'world': world_file}.items()
+    )
+
+    # Gazebo client (GUI)
+    gzclient = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(pkg_gazebo_ros, 'launch', 'gzclient.launch.py')
+        )
+    )
+
+    # Spawn robot
+    spawn_entity = Node(
+        package='gazebo_ros',
+        executable='spawn_entity.py',
+        arguments=[
+            '-entity', 'humanoid',
+            '-topic', 'robot_description',
+            '-x', '0',
+            '-y', '0',
+            '-z', '0.5'
+        ],
+        output='screen'
+    )
+
+    # Robot state publisher
+    robot_state_publisher = Node(
+        package='robot_state_publisher',
+        executable='robot_state_publisher',
+        output='screen',
+        parameters=[{'robot_description': robot_desc}]
+    )
+
+    return LaunchDescription([
+        gzserver,
+        gzclient,
+        robot_state_publisher,
+        spawn_entity
+    ])
+```
+
+### 5.7.2 Spawning Programmatically
+
+**Python Node to Spawn Robot**:
+```python
+import rclpy
+from rclpy.node import Node
+from gazebo_msgs.srv import SpawnEntity
+import os
+
+class RobotSpawner(Node):
+    def __init__(self):
+        super().__init__('robot_spawner')
+
+        # Create service client
+        self.spawn_client = self.create_client(SpawnEntity, '/spawn_entity')
+
+        while not self.spawn_client.wait_for_service(timeout_sec=5.0):
+            self.get_logger().info('Waiting for /spawn_entity service...')
+
+        self.get_logger().info('Spawn service is ready!')
+
+    def spawn_robot(self, robot_name, urdf_path, x=0.0, y=0.0, z=0.5):
+        """Spawn robot in Gazebo."""
+        # Read URDF file
+        with open(urdf_path, 'r') as f:
+            robot_xml = f.read()
+
+        # Create request
+        request = SpawnEntity.Request()
+        request.name = robot_name
+        request.xml = robot_xml
+        request.robot_namespace = robot_name
+        request.initial_pose.position.x = x
+        request.initial_pose.position.y = y
+        request.initial_pose.position.z = z
+
+        # Call service
+        future = self.spawn_client.call_async(request)
+        rclpy.spin_until_future_complete(self, future)
+
+        if future.result() is not None:
+            self.get_logger().info(f'Successfully spawned {robot_name}')
+            return True
+        else:
+            self.get_logger().error(f'Failed to spawn {robot_name}')
+            return False
+
+def main():
+    rclpy.init()
+    spawner = RobotSpawner()
+
+    # Spawn robot
+    urdf_path = '/path/to/humanoid.urdf'
+    spawner.spawn_robot('humanoid_01', urdf_path, x=0.0, y=0.0, z=0.5)
+
+    spawner.destroy_node()
+    rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+```
+
+---
+
+## 5.8 Gazebo-ROS 2 Integration
+
+### 5.8.1 ROS-Gazebo Bridge
+
+**Installing ros_gz Bridge**:
+```bash
+# Install bridge packages
+sudo apt install ros-humble-ros-gz-bridge ros-humble-ros-gz-sim
+
+# Verify installation
+ros2 pkg list | grep ros_gz
+```
+
+**Bridge Configuration**:
+```yaml
+# bridge_config.yaml
+- ros_topic_name: "/camera/image"
+  gz_topic_name: "/camera"
+  ros_type_name: "sensor_msgs/msg/Image"
+  gz_type_name: "gz.msgs.Image"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/cmd_vel"
+  gz_topic_name: "/model/humanoid/cmd_vel"
+  ros_type_name: "geometry_msgs/msg/Twist"
+  gz_type_name: "gz.msgs.Twist"
+  direction: ROS_TO_GZ
+
+- ros_topic_name: "/joint_states"
+  gz_topic_name: "/world/default/model/humanoid/joint_state"
+  ros_type_name: "sensor_msgs/msg/JointState"
+  gz_type_name: "gz.msgs.Model"
+  direction: GZ_TO_ROS
+```
+
+**Launch Bridge**:
+```python
+# bridge.launch.py
+from launch import LaunchDescription
+from launch_ros.actions import Node
+
+def generate_launch_description():
+    bridge = Node(
+        package='ros_gz_bridge',
+        executable='parameter_bridge',
+        arguments=[
+            '/camera@sensor_msgs/msg/Image@gz.msgs.Image',
+            '/cmd_vel@geometry_msgs/msg/Twist@gz.msgs.Twist',
+            '/joint_states@sensor_msgs/msg/JointState@gz.msgs.Model'
+        ],
+        output='screen'
+    )
+
+    return LaunchDescription([bridge])
+```
+
+### 5.8.2 Gazebo Plugins for ROS 2
+
+**Adding ROS 2 Control Plugin to URDF**:
+```xml
+<gazebo>
+  <plugin name="gazebo_ros2_control" filename="libgazebo_ros2_control.so">
+    <robot_sim_type>gazebo_ros2_control/GazeboSystem</robot_sim_type>
+    <parameters>$(find humanoid_description)/config/controllers.yaml</parameters>
+  </plugin>
+</gazebo>
+```
+
+**Joint State Publisher Plugin**:
+```xml
+<gazebo>
+  <plugin name="gazebo_ros_joint_state_publisher"
+          filename="libgazebo_ros_joint_state_publisher.so">
+    <update_rate>100</update_rate>
+    <joint_name>shoulder_pitch</joint_name>
+    <joint_name>shoulder_roll</joint_name>
+    <joint_name>elbow</joint_name>
+  </plugin>
+</gazebo>
+```
+
+**Differential Drive Plugin**:
+```xml
+<gazebo>
+  <plugin name="differential_drive" filename="libgazebo_ros_diff_drive.so">
+    <update_rate>50</update_rate>
+    <left_joint>left_wheel_joint</left_joint>
+    <right_joint>right_wheel_joint</right_joint>
+    <wheel_separation>0.4</wheel_separation>
+    <wheel_diameter>0.2</wheel_diameter>
+    <max_wheel_torque>20</max_wheel_torque>
+    <command_topic>cmd_vel</command_topic>
+    <odometry_topic>odom</odometry_topic>
+    <odometry_frame>odom</odometry_frame>
+    <robot_base_frame>base_link</robot_base_frame>
+    <publish_odom>true</publish_odom>
+    <publish_odom_tf>true</publish_odom_tf>
+  </plugin>
+</gazebo>
+```
+
+---
+
+## 5.9 Debugging Gazebo Simulations
+
+### 5.9.1 Common Issues and Solutions
+
+**1. Robot Falls Through Ground**:
+```xml
+<!-- Ensure ground plane has collision -->
+<collision name="collision">
+  <geometry>
+    <plane><normal>0 0 1</normal></plane>
+  </geometry>
+</collision>
+
+<!-- Check robot initial pose (z > 0) -->
+<pose>0 0 0.5 0 0 0</pose>
+```
+
+**2. Robot Explodes or Becomes Unstable**:
+- **Cause**: Physics step too large or incorrect inertia
+- **Solution**: Reduce step size
+```xml
+<physics name="1ms" type="ode">
+  <max_step_size>0.001</max_step_size>  <!-- Smaller = more stable -->
+</physics>
+```
+
+**3. Sensors Not Publishing Data**:
+```bash
+# Check Gazebo topics
+gz topic -l
+
+# Echo sensor data
+gz topic -e -t /camera
+
+# Check ROS 2 topics
+ros2 topic list
+ros2 topic echo /camera/image
+```
+
+**4. Model Not Loading**:
+```bash
+# Set Gazebo model path
+export GZ_SIM_RESOURCE_PATH=/path/to/models:$GZ_SIM_RESOURCE_PATH
+
+# Verify URDF syntax
+check_urdf robot.urdf
+
+# Validate SDF
+gz sdf --check robot.sdf
+```
+
+### 5.9.2 Gazebo Diagnostic Tools
+
+**Command-Line Tools**:
+```bash
+# List all models in simulation
+gz model -l
+
+# Get model info
+gz model -m humanoid -i
+
+# Get model pose
+gz model -m humanoid -p
+
+# Set model pose
+gz model -m humanoid -x 1 -y 2 -z 0.5
+
+# Pause/unpause simulation
+gz world -p 1  # Pause
+gz world -p 0  # Unpause
+
+# Get simulation stats
+gz stats
+```
+
+**Logging and Playback**:
+```bash
+# Record simulation state
+gz log -d ~/gazebo_logs
+
+# Play back recorded simulation
+gz log -p ~/gazebo_logs/state.log
+```
+
+---
+
+## 5.10 Complete Example: Humanoid in Office Environment
+
+### 5.10.1 Office World File
+
+```xml
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <world name="office_world">
+    <physics name="1ms" type="ode">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+
+    <scene>
+      <ambient>0.5 0.5 0.5 1</ambient>
+      <background>0.8 0.8 0.8 1</background>
+      <shadows>true</shadows>
+    </scene>
+
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+      <pose>5 5 10 0 0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <direction>-0.5 -0.5 -1</direction>
+    </light>
+
+    <!-- Ground -->
+    <include>
+      <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Ground Plane</uri>
+    </include>
+
+    <!-- Office furniture -->
+    <include>
+      <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Table</uri>
+      <name>desk</name>
+      <pose>2 0 0 0 0 0</pose>
+    </include>
+
+    <include>
+      <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Chair</uri>
+      <name>chair</name>
+      <pose>2 1 0 0 0 3.14</pose>
+    </include>
+
+    <!-- Walls (simplified) -->
+    <model name="wall_north">
+      <static>true</static>
+      <pose>0 5 1.5 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box><size>10 0.2 3</size></box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box><size>10 0.2 3</size></box>
+          </geometry>
+          <material>
+            <ambient>0.9 0.9 0.9 1</ambient>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Add more walls... -->
+  </world>
+</sdf>
+```
+
+### 5.10.2 Launch Configuration
+
+```python
+# office_simulation.launch.py
+import os
+from launch import LaunchDescription
+from launch.actions import IncludeLaunchDescription
+from launch_ros.actions import Node
+from ament_index_python.packages import get_package_share_directory
+
+def generate_launch_description():
+    pkg_dir = get_package_share_directory('humanoid_simulation')
+
+    # Gazebo with custom world
+    gazebo = IncludeLaunchDescription(
+        os.path.join(
+            get_package_share_directory('gazebo_ros'),
+            'launch', 'gazebo.launch.py'
+        ),
+        launch_arguments={
+            'world': os.path.join(pkg_dir, 'worlds', 'office.sdf'),
+            'verbose': 'true'
+        }.items()
+    )
+
+    # Spawn humanoid
+    spawn_humanoid = Node(
+        package='gazebo_ros',
+        executable='spawn_entity.py',
+        arguments=[
+            '-entity', 'humanoid',
+            '-file', os.path.join(pkg_dir, 'urdf', 'humanoid.urdf'),
+            '-x', '0', '-y', '0', '-z', '1.0'
+        ]
+    )
+
+    # ROS-Gazebo bridge
+    bridge = Node(
+        package='ros_gz_bridge',
+        executable='parameter_bridge',
+        arguments=[
+            '/camera/image@sensor_msgs/msg/Image@gz.msgs.Image',
+            '/joint_states@sensor_msgs/msg/JointState@gz.msgs.Model'
+        ]
+    )
+
+    return LaunchDescription([
+        gazebo,
+        spawn_humanoid,
+        bridge
+    ])
+```
+
+---
+
+## 5.11 Summary
+
+In this chapter, we covered:
+
+- ✅ URDF structure and syntax for robot description
+- ✅ SDF format for Gazebo-native models and worlds
+- ✅ Converting between URDF and SDF formats
+- ✅ Creating Gazebo world files with physics, lighting, and terrain
+- ✅ Spawning robots programmatically via ROS 2
+- ✅ Integrating Gazebo with ROS 2 using bridges and plugins
+- ✅ Debugging common Gazebo simulation issues
+
+### Key Takeaways
+
+1. **URDF is ROS-centric**: Best for robot descriptions in ROS ecosystems
+2. **SDF is more powerful**: Supports multiple models, plugins, and world descriptions
+3. **Conversion is seamless**: Gazebo handles URDF-to-SDF automatically
+4. **World design matters**: Proper lighting, terrain, and physics affect robot behavior
+5. **ROS-Gazebo bridge**: Essential for connecting simulation to ROS 2 control
+6. **Plugins extend functionality**: Use plugins for sensors, actuators, and custom behaviors
+7. **Debug systematically**: Use Gazebo CLI tools and logging for troubleshooting
+
+---
+
+## Further Reading
+
+1. Open Robotics. (2024). *Gazebo Documentation*. https://gazebosim.org/docs
+2. ROS 2 Documentation. (2024). *URDF Tutorial*. https://docs.ros.org/en/humble/Tutorials/Intermediate/URDF/URDF-Main.html
+3. Koenig, N., & Howard, A. (2004). Design and use paradigms for Gazebo, an open-source multi-robot simulator. *IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS)*.
+4. Open Source Robotics Foundation. (2024). *SDF Format Specification*. http://sdformat.org/spec
+
+---
+
+## Next Steps
+
+In **Chapter 6**, we'll explore **Visualization in Unity**, learning how to create high-fidelity rendering, realistic human-robot interaction simulations, and integrate Unity with ROS 2 for advanced visualization and virtual reality applications.
+
+:::tip Practice Exercise
+Create a complete simulation environment:
+1. Design a URDF model with at least 5 joints (arms, legs, or manipulator)
+2. Create an SDF world file with obstacles and proper lighting
+3. Spawn your robot in the world using a ROS 2 launch file
+4. Add camera and IMU sensors
+5. Verify sensor data is published to ROS 2 topics
+
+Bonus: Add a Gazebo plugin to control one joint via ROS 2 topics!
+:::

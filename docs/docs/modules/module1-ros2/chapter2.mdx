@@ -1,0 +1,795 @@
+---
+sidebar_position: 2
+title: Chapter 2 - Python Integration with ROS 2
+---
+
+# Chapter 2: Python Integration with ROS 2
+
+## Learning Objectives
+
+By the end of this chapter, you will be able to:
+
+1. Understand the rclpy library and its role in ROS 2 Python development
+2. Create custom ROS 2 nodes with publishers, subscribers, services, and actions
+3. Build and structure ROS 2 Python packages
+4. Apply object-oriented programming principles to robotics applications
+5. Implement Quality of Service (QoS) configurations for reliable communication
+6. Debug and test ROS 2 Python nodes effectively
+
+---
+
+## 2.1 Introduction to rclpy
+
+**rclpy** (ROS Client Library for Python) is the official Python client library for ROS 2. It provides Python bindings to the ROS 2 C API (rcl), enabling developers to create ROS 2 nodes, publishers, subscribers, services, and actions in Python.
+
+### Why Python for Robotics?
+
+**Advantages**:
+- **Rapid prototyping**: Quick iteration and testing
+- **Extensive ecosystem**: NumPy, SciPy, OpenCV, TensorFlow, PyTorch
+- **Readability**: Clear syntax, easier for beginners and educators
+- **AI/ML integration**: Seamless integration with machine learning frameworks
+- **Community support**: Large Python robotics community
+
+**Trade-offs**:
+- **Performance**: Slower than C++ (typically acceptable for most applications)
+- **Real-time constraints**: C++ preferred for hard real-time control loops
+- **Memory overhead**: Higher than compiled languages
+
+:::tip When to Use Python vs C++
+- **Python**: Perception, planning, AI/ML, high-level control, prototyping
+- **C++**: Low-level hardware drivers, real-time control, performance-critical code
+- **Both**: Many systems use C++ for control loops and Python for perception/planning
+:::
+
+---
+
+## 2.2 rclpy Core Concepts
+
+### Node Lifecycle
+
+Every rclpy node follows this lifecycle:
+
+```python
+import rclpy
+from rclpy.node import Node
+
+# 1. Initialize ROS 2 context
+rclpy.init(args=args)
+
+# 2. Create node instance
+node = Node('my_node')
+
+# 3. Create communication interfaces (publishers, subscribers, etc.)
+publisher = node.create_publisher(...)
+
+# 4. Spin the node (process callbacks)
+rclpy.spin(node)
+
+# 5. Cleanup
+node.destroy_node()
+rclpy.shutdown()
+```
+
+### The Node Class
+
+The `Node` class is the foundation of all ROS 2 Python nodes:
+
+```python
+from rclpy.node import Node
+
+class MyRobotNode(Node):
+    def __init__(self):
+        # Call parent constructor with node name
+        super().__init__('my_robot_node')
+
+        # Initialize node-specific attributes
+        self.counter = 0
+
+        # Log initialization
+        self.get_logger().info('MyRobotNode has been started')
+
+    def custom_method(self):
+        """Node-specific functionality"""
+        self.get_logger().info(f'Counter: {self.counter}')
+        self.counter += 1
+```
+
+**Key Node Methods**:
+- `get_logger()`: Access the node's logger
+- `create_publisher()`: Create a topic publisher
+- `create_subscription()`: Create a topic subscriber
+- `create_service()`: Create a service server
+- `create_client()`: Create a service client
+- `create_timer()`: Create a periodic timer
+- `get_clock()`: Access the node's clock
+- `declare_parameter()`: Declare node parameters
+
+---
+
+## 2.3 Publishers and Subscribers
+
+### Creating a Publisher
+
+Publishers send messages to topics:
+
+```python
+import rclpy
+from rclpy.node import Node
+from geometry_msgs.msg import Twist  # Message type
+from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
+
+class VelocityPublisher(Node):
+    def __init__(self):
+        super().__init__('velocity_publisher')
+
+        # Custom QoS profile for robot commands
+        qos_profile = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.VOLATILE,
+            depth=10
+        )
+
+        # Create publisher: (msg_type, topic, qos)
+        self.publisher = self.create_publisher(
+            Twist,
+            '/cmd_vel',
+            qos_profile
+        )
+
+        # Timer to publish at 10 Hz
+        self.timer = self.create_timer(0.1, self.publish_velocity)
+
+        self.get_logger().info('Velocity Publisher started')
+
+    def publish_velocity(self):
+        """Publish velocity commands"""
+        msg = Twist()
+        msg.linear.x = 0.5  # Move forward at 0.5 m/s
+        msg.angular.z = 0.2  # Turn at 0.2 rad/s
+
+        self.publisher.publish(msg)
+        self.get_logger().debug(f'Published: linear={msg.linear.x}, angular={msg.angular.z}')
+```
+
+### Creating a Subscriber
+
+Subscribers receive messages from topics:
+
+```python
+import rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import LaserScan
+
+class LaserSubscriber(Node):
+    def __init__(self):
+        super().__init__('laser_subscriber')
+
+        # Create subscriber: (msg_type, topic, callback, qos)
+        self.subscription = self.create_subscription(
+            LaserScan,
+            '/scan',
+            self.laser_callback,
+            10
+        )
+
+        self.get_logger().info('Laser Subscriber started')
+
+    def laser_callback(self, msg):
+        """Process incoming laser scan data"""
+        # Find minimum distance
+        min_distance = min(msg.ranges)
+
+        # Log warning if obstacle detected
+        if min_distance < 0.5:
+            self.get_logger().warn(f'Obstacle detected at {min_distance:.2f}m!')
+        else:
+            self.get_logger().debug(f'Clear path, min distance: {min_distance:.2f}m')
+```
+
+---
+
+## 2.4 Services
+
+Services enable request-response communication:
+
+### Service Server
+
+```python
+import rclpy
+from rclpy.node import Node
+from std_srvs.srv import SetBool
+
+class SafetyServiceNode(Node):
+    def __init__(self):
+        super().__init__('safety_service')
+
+        self.emergency_stop = False
+
+        # Create service: (srv_type, service_name, callback)
+        self.service = self.create_service(
+            SetBool,
+            '/emergency_stop',
+            self.emergency_stop_callback
+        )
+
+        self.get_logger().info('Safety Service ready')
+
+    def emergency_stop_callback(self, request, response):
+        """Handle emergency stop requests"""
+        self.emergency_stop = request.data
+
+        if self.emergency_stop:
+            self.get_logger().error('EMERGENCY STOP ACTIVATED!')
+            response.success = True
+            response.message = 'Robot stopped safely'
+        else:
+            self.get_logger().info('Emergency stop deactivated')
+            response.success = True
+            response.message = 'Robot can resume operation'
+
+        return response
+```
+
+### Service Client
+
+```python
+import rclpy
+from rclpy.node import Node
+from std_srvs.srv import SetBool
+
+class SafetyClientNode(Node):
+    def __init__(self):
+        super().__init__('safety_client')
+
+        # Create client
+        self.client = self.create_client(SetBool, '/emergency_stop')
+
+        # Wait for service
+        while not self.client.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info('Waiting for emergency_stop service...')
+
+        self.get_logger().info('Safety Client ready')
+
+    def activate_emergency_stop(self):
+        """Call the emergency stop service"""
+        request = SetBool.Request()
+        request.data = True
+
+        # Call service asynchronously
+        future = self.client.call_async(request)
+        return future
+
+    def wait_for_response(self, future):
+        """Wait for service response"""
+        rclpy.spin_until_future_complete(self, future)
+
+        try:
+            response = future.result()
+            self.get_logger().info(f'Service response: {response.message}')
+            return response
+        except Exception as e:
+            self.get_logger().error(f'Service call failed: {e}')
+            return None
+```
+
+---
+
+## 2.5 Parameters
+
+Parameters allow runtime configuration of nodes:
+
+```python
+import rclpy
+from rclpy.node import Node
+from rcl_interfaces.msg import ParameterDescriptor
+
+class ConfigurableNode(Node):
+    def __init__(self):
+        super().__init__('configurable_node')
+
+        # Declare parameters with descriptors
+        self.declare_parameter(
+            'max_speed',
+            1.0,  # Default value
+            ParameterDescriptor(
+                description='Maximum robot speed in m/s'
+            )
+        )
+
+        self.declare_parameter(
+            'robot_name',
+            'humanoid_001',
+            ParameterDescriptor(
+                description='Unique robot identifier'
+            )
+        )
+
+        # Get parameter values
+        self.max_speed = self.get_parameter('max_speed').value
+        self.robot_name = self.get_parameter('robot_name').value
+
+        self.get_logger().info(f'Robot: {self.robot_name}, Max Speed: {self.max_speed}')
+
+        # Add callback for parameter changes
+        self.add_on_set_parameters_callback(self.parameter_callback)
+
+    def parameter_callback(self, params):
+        """Handle parameter updates"""
+        from rcl_interfaces.msg import SetParametersResult
+
+        for param in params:
+            if param.name == 'max_speed' and param.value > 5.0:
+                self.get_logger().warn('Max speed too high! Rejecting change.')
+                return SetParametersResult(successful=False)
+
+            self.get_logger().info(f'Parameter {param.name} changed to {param.value}')
+
+        # Update internal state
+        self.max_speed = self.get_parameter('max_speed').value
+        self.robot_name = self.get_parameter('robot_name').value
+
+        return SetParametersResult(successful=True)
+```
+
+**Setting Parameters from Command Line**:
+```bash
+ros2 run my_package configurable_node --ros-args -p max_speed:=2.5 -p robot_name:="atlas"
+```
+
+---
+
+## 2.6 Timers and Periodic Execution
+
+Timers execute callbacks at regular intervals:
+
+```python
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import String
+
+class HeartbeatNode(Node):
+    def __init__(self):
+        super().__init__('heartbeat_node')
+
+        # Create publisher
+        self.publisher = self.create_publisher(String, '/heartbeat', 10)
+
+        # Create timer: callback every 1.0 seconds
+        self.timer = self.create_timer(1.0, self.timer_callback)
+
+        self.count = 0
+        self.get_logger().info('Heartbeat Node started')
+
+    def timer_callback(self):
+        """Called every second"""
+        msg = String()
+        msg.data = f'Heartbeat {self.count}'
+
+        self.publisher.publish(msg)
+        self.get_logger().info(f'Published: {msg.data}')
+
+        self.count += 1
+```
+
+---
+
+## 2.7 Building ROS 2 Python Packages
+
+### Package Structure
+
+A typical ROS 2 Python package structure:
+
+```
+my_robot_package/
+├── my_robot_package/
+│   ├── __init__.py
+│   ├── robot_node.py
+│   ├── sensor_node.py
+│   └── control_node.py
+├── resource/
+│   └── my_robot_package
+├── test/
+│   ├── test_copyright.py
+│   ├── test_flake8.py
+│   └── test_pep257.py
+├── package.xml
+├── setup.py
+├── setup.cfg
+└── README.md
+```
+
+### Creating a Package
+
+```bash
+# Navigate to your workspace src directory
+cd ~/ros2_ws/src
+
+# Create package
+ros2 pkg create my_robot_package --build-type ament_python --dependencies rclpy std_msgs geometry_msgs sensor_msgs
+
+# This creates the basic package structure
+```
+
+### setup.py Configuration
+
+```python
+from setuptools import setup
+
+package_name = 'my_robot_package'
+
+setup(
+    name=package_name,
+    version='0.1.0',
+    packages=[package_name],
+    data_files=[
+        ('share/ament_index/resource_index/packages',
+            ['resource/' + package_name]),
+        ('share/' + package_name, ['package.xml']),
+    ],
+    install_requires=['setuptools'],
+    zip_safe=True,
+    maintainer='Your Name',
+    maintainer_email='you@example.com',
+    description='Humanoid robot control package',
+    license='Apache License 2.0',
+    tests_require=['pytest'],
+    entry_points={
+        'console_scripts': [
+            'robot_node = my_robot_package.robot_node:main',
+            'sensor_node = my_robot_package.sensor_node:main',
+            'control_node = my_robot_package.control_node:main',
+        ],
+    },
+)
+```
+
+### package.xml
+
+```xml
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>my_robot_package</name>
+  <version>0.1.0</version>
+  <description>Humanoid robot control package</description>
+  <maintainer email="you@example.com">Your Name</maintainer>
+  <license>Apache License 2.0</license>
+
+  <!-- Build dependencies -->
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <!-- Runtime dependencies -->
+  <depend>rclpy</depend>
+  <depend>std_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>sensor_msgs</depend>
+
+  <!-- Test dependencies -->
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
+```
+
+### Building the Package
+
+```bash
+# Navigate to workspace root
+cd ~/ros2_ws
+
+# Build the package
+colcon build --packages-select my_robot_package
+
+# Source the workspace
+source install/setup.bash
+
+# Run a node
+ros2 run my_robot_package robot_node
+```
+
+---
+
+## 2.8 Complete Example: Humanoid Sensor Monitor
+
+Let's build a complete example that monitors humanoid robot sensors:
+
+```python
+#!/usr/bin/env python3
+"""
+Humanoid Sensor Monitor Node
+Subscribes to multiple sensor topics and publishes aggregated status
+"""
+
+import rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import Imu, Image, LaserScan
+from std_msgs.msg import String
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+
+class HumanoidSensorMonitor(Node):
+    def __init__(self):
+        super().__init__('humanoid_sensor_monitor')
+
+        # Declare parameters
+        self.declare_parameter('update_rate', 10.0)
+        self.declare_parameter('robot_name', 'humanoid_01')
+
+        update_rate = self.get_parameter('update_rate').value
+        self.robot_name = self.get_parameter('robot_name').value
+
+        # Sensor data storage
+        self.imu_data = None
+        self.camera_data = None
+        self.lidar_data = None
+
+        # QoS profiles
+        sensor_qos = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=10
+        )
+
+        # Create subscribers
+        self.imu_sub = self.create_subscription(
+            Imu,
+            '/imu/data',
+            self.imu_callback,
+            sensor_qos
+        )
+
+        self.camera_sub = self.create_subscription(
+            Image,
+            '/camera/image_raw',
+            self.camera_callback,
+            sensor_qos
+        )
+
+        self.lidar_sub = self.create_subscription(
+            LaserScan,
+            '/scan',
+            self.lidar_callback,
+            sensor_qos
+        )
+
+        # Create publisher for status
+        self.status_pub = self.create_publisher(
+            String,
+            '/robot/status',
+            10
+        )
+
+        # Create timer for status updates
+        timer_period = 1.0 / update_rate
+        self.timer = self.create_timer(timer_period, self.publish_status)
+
+        self.get_logger().info(f'{self.robot_name} Sensor Monitor started')
+
+    def imu_callback(self, msg):
+        """Process IMU data"""
+        self.imu_data = msg
+        # Check for unusual accelerations
+        accel_magnitude = (
+            msg.linear_acceleration.x**2 +
+            msg.linear_acceleration.y**2 +
+            msg.linear_acceleration.z**2
+        )**0.5
+
+        if accel_magnitude > 20.0:  # Threshold in m/s^2
+            self.get_logger().warn(f'High acceleration detected: {accel_magnitude:.2f} m/s^2')
+
+    def camera_callback(self, msg):
+        """Process camera data"""
+        self.camera_data = msg
+        self.get_logger().debug(f'Camera frame: {msg.width}x{msg.height}')
+
+    def lidar_callback(self, msg):
+        """Process LiDAR data"""
+        self.lidar_data = msg
+        # Check for obstacles
+        min_distance = min(msg.ranges)
+        if min_distance < 0.3:
+            self.get_logger().warn(f'Obstacle very close: {min_distance:.2f}m')
+
+    def publish_status(self):
+        """Publish aggregated sensor status"""
+        status_msg = String()
+
+        # Build status message
+        status_parts = [f'Robot: {self.robot_name}']
+
+        if self.imu_data:
+            status_parts.append('IMU: OK')
+        else:
+            status_parts.append('IMU: NO DATA')
+
+        if self.camera_data:
+            status_parts.append('Camera: OK')
+        else:
+            status_parts.append('Camera: NO DATA')
+
+        if self.lidar_data:
+            min_dist = min(self.lidar_data.ranges)
+            status_parts.append(f'LiDAR: OK (min: {min_dist:.2f}m)')
+        else:
+            status_parts.append('LiDAR: NO DATA')
+
+        status_msg.data = ' | '.join(status_parts)
+        self.status_pub.publish(status_msg)
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = HumanoidSensorMonitor()
+
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+```
+
+---
+
+## 2.9 Debugging and Testing
+
+### Logging Levels
+
+```python
+# Different logging levels
+self.get_logger().debug('Detailed debugging information')
+self.get_logger().info('General information')
+self.get_logger().warn('Warning message')
+self.get_logger().error('Error occurred')
+self.get_logger().fatal('Critical error')
+```
+
+**Set log level from command line**:
+```bash
+ros2 run my_package my_node --ros-args --log-level debug
+```
+
+### Common Debugging Commands
+
+```bash
+# List all nodes
+ros2 node list
+
+# Get node info
+ros2 node info /my_node
+
+# List topics
+ros2 topic list
+
+# Echo topic messages
+ros2 topic echo /cmd_vel
+
+# Check topic Hz
+ros2 topic hz /scan
+
+# Call a service
+ros2 service call /emergency_stop std_srvs/srv/SetBool "{data: true}"
+
+# Get parameter
+ros2 param get /my_node max_speed
+
+# Set parameter
+ros2 param set /my_node max_speed 2.0
+```
+
+---
+
+## 2.10 Best Practices
+
+### 1. Use Object-Oriented Design
+```python
+# Good: Encapsulate node logic in a class
+class MyNode(Node):
+    def __init__(self):
+        super().__init__('my_node')
+        self.initialize_components()
+
+    def initialize_components(self):
+        # Setup code here
+        pass
+```
+
+### 2. Handle Exceptions
+```python
+try:
+    rclpy.spin(node)
+except KeyboardInterrupt:
+    node.get_logger().info('Shutting down gracefully')
+except Exception as e:
+    node.get_logger().error(f'Unexpected error: {e}')
+finally:
+    node.destroy_node()
+    rclpy.shutdown()
+```
+
+### 3. Use Parameters for Configuration
+```python
+# Avoid hardcoding values
+self.declare_parameter('update_rate', 10.0)
+update_rate = self.get_parameter('update_rate').value
+```
+
+### 4. Validate Input Data
+```python
+def callback(self, msg):
+    if msg.data < 0:
+        self.get_logger().warn('Invalid data received')
+        return
+    # Process valid data
+```
+
+### 5. Document Your Code
+```python
+def process_sensor_data(self, data):
+    """
+    Process incoming sensor data and extract relevant features.
+
+    Args:
+        data (SensorMsg): Raw sensor data
+
+    Returns:
+        dict: Processed features
+    """
+    # Implementation
+    pass
+```
+
+---
+
+## 2.11 Summary
+
+In this chapter, we covered:
+
+- ✅ rclpy fundamentals and node lifecycle
+- ✅ Creating publishers and subscribers
+- ✅ Implementing services (servers and clients)
+- ✅ Using parameters for configuration
+- ✅ Working with timers
+- ✅ Building ROS 2 Python packages
+- ✅ Complete sensor monitoring example
+- ✅ Debugging techniques and best practices
+
+### Key Takeaways
+
+1. **rclpy provides Python bindings** for ROS 2 functionality
+2. **Object-oriented design** improves code organization
+3. **Parameters enable runtime configuration** without code changes
+4. **QoS profiles control** communication reliability and performance
+5. **Package structure** follows ament_python conventions
+6. **Debugging tools** (ros2 CLI) are essential for development
+
+---
+
+## Further Reading
+
+1. Open Robotics. (2024). *rclpy API Documentation*. https://docs.ros.org/en/humble/p/rclpy/
+2. Open Robotics. (2024). *Creating a ROS 2 Package*. https://docs.ros.org/en/humble/Tutorials/Beginner-Client-Libraries/Creating-Your-First-ROS2-Package.html
+3. Quigley, M., Gerkey, B., & Smart, W. D. (2015). *Programming Robots with ROS*. O'Reilly Media.
+
+---
+
+## Next Steps
+
+In Chapter 3, we'll explore **Humanoid Robot Description**, learning how to create URDF models, define kinematic chains, and simulate humanoid robots in ROS 2.
+
+:::tip Practice Exercise
+Create a ROS 2 package with a node that:
+1. Subscribes to `/cmd_vel` topic
+2. Logs velocity commands
+3. Publishes safety warnings if velocities exceed thresholds
+4. Uses parameters for threshold configuration
+:::
